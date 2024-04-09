@@ -12,7 +12,9 @@ class CellType(Enum):
     UNDEFINED = 0   # Default
     FLOOR = 1       # Floor cell
     WALL = 2        # Wall cell
-    OOB = 3         # Out Of Bounds (OOB) cell
+    GRASS = 3       # Grass cell
+    WATER = 4       # Water cell
+    OOB = 5         # Out Of Bounds (OOB) cell
 
 
 # Actions agents can take
@@ -30,6 +32,10 @@ class Agent():
         self.id = id
         self.abilities = abilities
         self.position = position
+        self.rangeOfSight = 3
+    
+    def getPosition(self):
+        return self.position
 
 
 # Environment engine
@@ -47,7 +53,8 @@ class EnvEngine():
         self.agents  : List[Agent] = []
 
     # Load agent with specified abilities
-    def load_agent(self, abilities=[1]):
+    # let's say we let agent go on floor, grass, and water
+    def load_agent(self, abilities=[1, 3, 4]):
         # NOTE: as of now, abilities MUST contain '1' for normal floors
         # agent = {'id': len(self.agents)+1, 'abilities':abilities, 'position': None}
         agent = Agent(id=len(self.agents)+1, abilities=abilities, position=None)
@@ -78,43 +85,98 @@ class EnvEngine():
     def load_map(self):
         pass
 
-    # Move agent in specified direction, if valid
-    def move_agent(self, agent:Agent, dir):
-        # Check validity from least to most computationally taxing
-        #   Check movement within map boundary
-        #   Check collision with walls
-        #   Check collision with other agents
+    def move_agent(self, agent: Agent, dir):
+        # Define move initially as None to handle unexpected cases
+        move = None
+
         if dir == Action.WEST:
             move = (0, -1)
-        if dir == Action.EAST:
+        elif dir == Action.EAST:
             move = (0, 1)
-        if dir == Action.NORTH:
+        elif dir == Action.NORTH:
             move = (-1, 0)
-        if dir == Action.SOUTH:
+        elif dir == Action.SOUTH:
             move = (1, 0)
 
-        n_row, n_col = agent.position[0] + move[0], agent.position[1] + move[1]
+        # ensure 'move' is not None before proceeding
+        if move is not None:
+            n_row, n_col = agent.position[0] + move[0], agent.position[1] + move[1]
 
-        # if map[n_row][n_col] == CellType.OOB:
-        #     # Agent can't move out of bounds
-        #     return
-        
+            # Correctly call and use the result of check_agent_ability
+            if self.check_agent_ability(agent, dir, n_row, n_col):
+                agent.position = (n_row, n_col)
+        else:
+            print(f"Invalid direction {dir}")
+
+    # Move agent in specified direction, if valid
+    def check_agent_ability(self, agent:Agent, dir, n_row, n_col):
+        if n_row < 0 or n_row >= len(self.map) or n_col < 0 or n_col >= len(self.map[0]):
+            # Position is out of bounds
+            return False
+
         match self.map[n_row][n_col]:
             case CellType.OOB:
                 # Agent can't move out of bounds
-                return
+                return False
             case CellType.WALL:
                 # Agent can't move into walls
-                return
-            case CellType.FLOOR:
-                # Move agent to new position if not already occupied
-                for check_agent in self.agents:
-                    if check_agent.position == (n_row, n_col):
-                        print("Position {} already occupied by agent {}".format((check_agent.position, check_agent.id)))
-                        return
+                return False
+            case CellType.GRASS:
+                if 3 not in agent.abilities:
+                    # Agent can't move into grass
+                    return False
+            case CellType.WATER:
+                if 4 not in agent.abilities:
+                    # Agent can't move into water
+                    return False
                 
-                agent.position = (n_row, n_col)
+            # we don't check floor because it's the default walkable cell type
 
+        # Move agent to new position if not already occupied
+        for check_agent in self.agents:
+            if check_agent.position == (n_row, n_col):
+                print("Position {} already occupied by agent {}".format((check_agent.position, check_agent.id)))
+                return False
+                
+        return True
+
+    def get_agent_ability(self, agent:Agent):
+        return agent.abilities
+
+    def agent_peek(self, agent:Agent, dir): 
+        if agent.position is None:
+            # Optionally, print a warning or log this event for debugging
+            print(f"Warning: Attempted to peek with agent {agent} having None position.")
+            # Return an empty observation or handle this scenario as needed
+            return []
+    
+        # Define the sight range of the agent
+        sight_range = agent.rangeOfSight
+
+        # Get the agent's current position
+        agent_row, agent_col = agent.position
+
+        observation = []
+        if dir == Action.NORTH:
+            min_row = max(0, agent_row - sight_range)
+            for row in range(min_row, agent_row):
+                observation.append(self.map[row][agent_col])
+            observation.reverse() # we reverse the list to make it from near to far since we are going from bottom to top
+        elif dir == Action.SOUTH:
+            max_row = min(len(self.map) - 1, agent_row + sight_range)
+            for row in range(agent_row + 1, max_row + 1):
+                observation.append(self.map[row][agent_col])
+        elif dir == Action.EAST:
+            max_col = min(len(self.map[0]) - 1, agent_col + sight_range)
+            for col in range(agent_col + 1, max_col + 1):
+                observation.append(self.map[agent_row][col])
+        elif dir == Action.WEST:
+            min_col = max(0, agent_col - sight_range)
+            for col in range(min_col, agent_col):
+                observation.append(self.map[agent_row][col])
+            observation.reverse()
+
+        return observation
 
     def get_env_state(self):
         pass
@@ -132,8 +194,8 @@ class EnvEngine():
     def calc_agent_observation(self, agent:Agent):
         obs = []
 
-        for d_row in range(self.agent_obs_dist+1):
-            for d_col in range(self.agent_obs_dist+1):
+        for d_row in range(agent.rangeOfSight+1):
+            for d_col in range(agent.rangeOfSight+1):
                 if d_row == 0 and d_col == 0:
                     n_row, n_col = agent.position[0] + d_row, agent.position[1] + d_col
                     obs.append({'cell_pos':(n_row, n_col), 'type':self.map[n_row][n_col]})    
@@ -192,67 +254,46 @@ class EnvEngine():
         print("Generating map")
         dirs = [(0, -1), (0, 1), (1, 0), (-1, 0)]
         dirs_idx = [0, 1, 2, 3]
-        # dirs = copy.deepcopy(dirs)
         random.shuffle(dirs)
         prev_dir = random.randint(0, 3)
 
-        # weights_base = [0.2, 0.2, 0.2, 0.2]
         weights_base = [0.1, 0.1, 0.1, 0.1]
 
         map = [[CellType.WALL for _ in range(self.cols)] for _ in range(self.rows)]
 
-        current_pos = (random.randint(0, self.cols-1), random.randint(0, self.rows-1))
+        current_pos = (random.randint(0, self.cols - 1), random.randint(0, self.rows - 1))
 
         all_dirs = []
-
         floor_count = 1
-        while floor_count < self.rows * self.cols * 0.60:
+        target_floor_count = self.rows * self.cols * 0.60  # Adjust floor target as needed
+
+        while floor_count < target_floor_count:
             x, y = current_pos
-
-            weights = copy.deepcopy(weights_base)
-            # weights[prev_dir] = 0.4
-            weights[prev_dir] = 0.7 # heavily prioritizes straight lines
-
-            # print("weights: {}\npop: {}".format(weights, dirs_idx))
+            weights = weights_base.copy()
+            weights[prev_dir] = 0.7  # Heavily prioritizes straight lines
 
             new_dir_idx = random.choices(dirs_idx, weights)[0]
             dx, dy = dirs[new_dir_idx]
-
-            all_dirs.append(new_dir_idx)
-
             nx, ny = x + dx, y + dy
 
             if 0 <= nx < self.cols and 0 <= ny < self.rows:
-                if map[nx][ny] == CellType.WALL:
+                if map[ny][nx] == CellType.WALL:
                     floor_count += 1
-
-                map[nx][ny] = CellType.FLOOR
+                    map[ny][nx] = CellType.FLOOR  # Mark as floor
                 current_pos = (nx, ny)
-                
             prev_dir = new_dir_idx
 
+        # Additional step to introduce GRASS and WATER
+        for _ in range(int(self.rows * self.cols * 0.10)):  # Adjust grass/water target as needed
+            for cell_type in [CellType.GRASS, CellType.WATER]:
+                gx, gy = random.randint(0, self.cols - 1), random.randint(0, self.rows - 1)
+                if map[gy][gx] == CellType.FLOOR:
+                    map[gy][gx] = cell_type
+
         print("dir counts: {}".format(Counter(all_dirs)))
-
-            # random.shuffle(dirs)
-            # moved = False
-
-            # for dx, dy in dirs:
-            #     nx, ny = x + dx, y + dy
-
-            #     if 0 <= nx < self.cols and 0 <= ny < self.rows:
-            #         # print("new pos: {}".format((nx, ny)))
-                    
-            #         if map[nx][ny] == 0:
-            #             floor_count += 1
-
-            #         map[nx][ny] = 1
-
-            #         current_pos = (nx, ny)
-            #         moved = True
-            #         break
-        
         self.map = map
         return map
+
     
     # Get base map data
     def get_map(self):
