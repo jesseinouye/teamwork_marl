@@ -19,7 +19,7 @@ class Visualizer():
 
         self.cell_size = WIDTH // self.cols
 
-        self.map = self.env.generate_map_random_walk()
+        self.map = self.env.generate_map()
         self.env.load_agent(abilities=[1, 3, 4])
         self.env.place_agents()
         # self.env.load_agent(abilities=[1,2])
