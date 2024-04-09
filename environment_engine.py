@@ -15,6 +15,12 @@ class CellType(Enum):
     GRASS = 3       # Grass cell
     WATER = 4       # Water cell
     OOB = 5         # Out Of Bounds (OOB) cell
+    UNKNOWN = 6
+
+
+# Agent observations
+# class AgentObs(CellType):
+#     UNKNOWN = 6
 
 
 # Actions agents can take
@@ -50,6 +56,7 @@ class EnvEngine():
         self.agent_obs_dist = 3
 
         self.map = None
+        self.obs_map = None
         self.agents  : List[Agent] = []
 
     # Load agent with specified abilities
@@ -157,24 +164,65 @@ class EnvEngine():
         agent_row, agent_col = agent.position
 
         observation = []
+        # if dir == Action.NORTH:
+        #     min_row = max(0, agent_row - sight_range)
+        #     for row in range(min_row, agent_row):
+        #        observation.append(self.map[row][agent_col])
+        #     observation.reverse() # we reverse the list to make it from near to far since we are going from bottom to top
+        # elif dir == Action.SOUTH:
+        #     max_row = min(len(self.map) - 1, agent_row + sight_range)
+        #     for row in range(agent_row + 1, max_row + 1):
+        #         observation.append(self.map[row][agent_col])
+        # elif dir == Action.EAST:
+        #     max_col = min(len(self.map[0]) - 1, agent_col + sight_range)
+        #     for col in range(agent_col + 1, max_col + 1):
+        #         observation.append(self.map[agent_row][col])
+        # elif dir == Action.WEST:
+        #     min_col = max(0, agent_col - sight_range)
+        #     for col in range(min_col, agent_col):
+        #         observation.append(self.map[agent_row][col])
+        #     observation.reverse()
+
         if dir == Action.NORTH:
-            min_row = max(0, agent_row - sight_range)
-            for row in range(min_row, agent_row):
-                observation.append(self.map[row][agent_col])
-            observation.reverse() # we reverse the list to make it from near to far since we are going from bottom to top
+            for d_row in range(1, sight_range+1):
+                n_row = agent_row - d_row
+                if n_row < 0 or n_row >= self.rows:
+                    obs_type = CellType.OOB
+                else:
+                    obs_type = self.map[n_row][agent_col]
+                    self.obs_map[n_row][agent_col] = obs_type
+                observation.append({'position':(n_row, agent_col), 'type':obs_type})
         elif dir == Action.SOUTH:
-            max_row = min(len(self.map) - 1, agent_row + sight_range)
-            for row in range(agent_row + 1, max_row + 1):
-                observation.append(self.map[row][agent_col])
+            for d_row in range(1, sight_range+1):
+                n_row = agent_row + d_row
+                if n_row < 0 or n_row >= self.rows:
+                    obs_type = CellType.OOB
+                else:
+                    obs_type = self.map[n_row][agent_col]
+                    self.obs_map[n_row][agent_col] = obs_type
+                observation.append({'position':(n_row, agent_col), 'type':obs_type})
         elif dir == Action.EAST:
-            max_col = min(len(self.map[0]) - 1, agent_col + sight_range)
-            for col in range(agent_col + 1, max_col + 1):
-                observation.append(self.map[agent_row][col])
+            for d_col in range(1, sight_range+1):
+                n_col = agent_col + d_col
+                if n_col < 0 or n_col >= self.cols:
+                    obs_type = CellType.OOB
+                else:
+                    obs_type = self.map[agent_row][n_col]
+                    self.obs_map[agent_row][n_col] = obs_type
+                observation.append({'position':(agent_row, n_col), 'type':obs_type})
         elif dir == Action.WEST:
-            min_col = max(0, agent_col - sight_range)
-            for col in range(min_col, agent_col):
-                observation.append(self.map[agent_row][col])
-            observation.reverse()
+            for d_col in range(1, sight_range+1):
+                n_col = agent_col - d_col
+                if n_col < 0 or n_col >= self.cols:
+                    obs_type = CellType.OOB
+                else:
+                    obs_type = self.map[agent_row][n_col]
+                    self.obs_map[agent_row][n_col] = obs_type
+                observation.append({'position':(agent_row, n_col), 'type':obs_type})
+
+
+        # for obs in observation:
+        #     self.obs_map[obs['position'][0], obs['position'][1]]
 
         return observation
 
@@ -302,6 +350,10 @@ class EnvEngine():
         self.add_clustered_features(CellType.GRASS, 3, 20)  # 3 clusters, each with 20 cells
         self.add_clustered_features(CellType.WATER, 2, 15)  # 2 clusters, each with 15 cells
         self.ensure_connectivity()
+
+        # Create observation map
+        self.obs_map = [[CellType.UNKNOWN for _ in range(self.cols)] for _ in range(self.rows)]
+
         print("Map generation complete")
         return self.map
     
@@ -432,6 +484,9 @@ class EnvEngine():
     def get_map(self):
         return self.map
     
+    def get_obs_map(self):
+        return self.obs_map
+
     # Get agent data
     def get_agents(self):
         return self.agents
