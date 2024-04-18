@@ -4,7 +4,9 @@ import random
 
 WIDTH = 800
 HEIGHT = 800
+FULL_WIDTH = WIDTH * 2
 BLACK = (0, 0, 0)
+GRAY = (125, 125, 125)
 WHITE = (255, 255, 255)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
@@ -31,20 +33,37 @@ class Visualizer():
             CellType.WALL: BLACK,
             CellType.GRASS: GREEN,
             CellType.WATER: BLUE,
+            CellType.FLOOR: WHITE
             # Add other CellType mappings here
         }
 
     def draw_map(self, screen, map, agents:list[Agent]=[]):
+        # Draw ground truth map
         for row in range(self.rows):
             for col in range(self.cols):
                 cell_type = map[row][col]
                 cell_color = self.color_map.get(cell_type, WHITE)  # Default to WHITE if not found
                 pygame.draw.rect(screen, cell_color, (col * self.cell_size, row * self.cell_size, self.cell_size, self.cell_size))
 
+        # Draw agent locations
         if agents:
             for agent in agents:
                 if agent.position is not None:
                     pygame.draw.rect(screen, RED, (agent.position[1] * self.cell_size, agent.position[0] * self.cell_size, self.cell_size, self.cell_size))
+
+    def draw_observation_map(self, screen, obs_map, agents:list[Agent]=[]):
+        # Draw observation map
+        for row in range(self.rows):
+            for col in range(self.cols):
+                cell_obs_type = obs_map[row][col]
+                cell_obs_color = self.color_map.get(cell_obs_type, GRAY)
+                pygame.draw.rect(screen, cell_obs_color, (WIDTH + (col * self.cell_size), row * self.cell_size, self.cell_size, self.cell_size))
+
+        if agents:
+            for agent in agents:
+                if agent.position is not None:
+                    pygame.draw.rect(screen, RED, (WIDTH + (agent.position[1] * self.cell_size), agent.position[0] * self.cell_size, self.cell_size, self.cell_size))
+
 
     # your original main: 
                     
@@ -89,7 +108,7 @@ class Visualizer():
                     
 
     def main(self):
-        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        screen = pygame.display.set_mode((FULL_WIDTH, HEIGHT))
         pygame.display.set_caption("SLAM Visualizer")
         screen.fill(WHITE)
 
@@ -126,7 +145,9 @@ class Visualizer():
                 self.env.move_agent(agent, self.agent_direction)
 
             map = self.env.get_map()
+            obs_map = self.env.get_obs_map()
             self.draw_map(screen, map, agents)
+            self.draw_observation_map(screen, obs_map, agents)
             pygame.display.update()
 
             # Adding a small delay can make the agent's movement easier to observe
@@ -137,7 +158,7 @@ class Visualizer():
         print("obs: {}".format(obs))
         if len(obs) == 0:
             return False
-        return obs[0] != CellType.WALL
+        return (obs[0]['type'] != CellType.WALL and obs[0]['type'] != CellType.OOB)
     
 
     def choose_new_direction(self, current_direction):
