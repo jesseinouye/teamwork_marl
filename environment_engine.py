@@ -15,7 +15,7 @@ class CellType(Enum):
     GRASS = 3       # Grass cell
     WATER = 4       # Water cell
     OOB = 5         # Out Of Bounds (OOB) cell
-    UNKNOWN = 6
+    UNKNOWN = 6     # Agent doesn't know what type
 
 
 # Agent observations
