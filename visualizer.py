@@ -1,6 +1,15 @@
 import pygame
-from environment_engine import EnvEngine, Action, Agent, CellType
 import random
+import torch
+
+from torchrl.envs.utils import check_env_specs
+
+from tensordict import TensorDict, TensorDictBase
+from tensordict.nn import TensorDictModule, TensorDictSequential
+
+from environment_engine import EnvEngine, Action, Agent, CellType
+
+
 
 WIDTH = 800
 HEIGHT = 800
@@ -11,6 +20,7 @@ WHITE = (255, 255, 255)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
+PURPLE = (255, 0, 255)
 
 class Visualizer():
     def __init__(self) -> None:
@@ -21,9 +31,10 @@ class Visualizer():
 
         self.cell_size = WIDTH // self.cols
 
-        self.map = self.env.generate_map()
-        self.env.load_agent(abilities=[1, 3, 4])
-        self.env.place_agents()
+        # self.map = self.env.generate_map()
+        self.env.load_agent(abilities=[1, 3])
+        self.env.load_agent(abilities=[1, 4])
+        # self.env.place_agents_at_start()
         # self.env.load_agent(abilities=[1,2])
         # self.env.place_agents()
 
@@ -33,9 +44,13 @@ class Visualizer():
             CellType.WALL: BLACK,
             CellType.GRASS: GREEN,
             CellType.WATER: BLUE,
-            CellType.FLOOR: WHITE
+            CellType.FLOOR: WHITE,
+            CellType.AGENT_1: RED,
+            CellType.AGENT_2: PURPLE
             # Add other CellType mappings here
         }
+
+        self.device = "cpu"
 
     def draw_map(self, screen, map, agents:list[Agent]=[]):
         # Draw ground truth map
@@ -46,10 +61,10 @@ class Visualizer():
                 pygame.draw.rect(screen, cell_color, (col * self.cell_size, row * self.cell_size, self.cell_size, self.cell_size))
 
         # Draw agent locations
-        if agents:
-            for agent in agents:
-                if agent.position is not None:
-                    pygame.draw.rect(screen, RED, (agent.position[1] * self.cell_size, agent.position[0] * self.cell_size, self.cell_size, self.cell_size))
+        # if agents:
+        #     for agent in agents:
+        #         if agent.position is not None:
+        #             pygame.draw.rect(screen, RED, (agent.position[1] * self.cell_size, agent.position[0] * self.cell_size, self.cell_size, self.cell_size))
 
     def draw_observation_map(self, screen, obs_map, agents:list[Agent]=[]):
         # Draw observation map
@@ -59,10 +74,11 @@ class Visualizer():
                 cell_obs_color = self.color_map.get(cell_obs_type, GRAY)
                 pygame.draw.rect(screen, cell_obs_color, (WIDTH + (col * self.cell_size), row * self.cell_size, self.cell_size, self.cell_size))
 
-        if agents:
-            for agent in agents:
-                if agent.position is not None:
-                    pygame.draw.rect(screen, RED, (WIDTH + (agent.position[1] * self.cell_size), agent.position[0] * self.cell_size, self.cell_size, self.cell_size))
+        # Draw agent locations
+        # if agents:
+        #     for agent in agents:
+        #         if agent.position is not None:
+        #             pygame.draw.rect(screen, RED, (WIDTH + (agent.position[1] * self.cell_size), agent.position[0] * self.cell_size, self.cell_size, self.cell_size))
 
 
     # your original main: 
@@ -130,9 +146,10 @@ class Visualizer():
             last_position = agent.position
 
             # Autonomous exploration
+            # TODO: change this to use calc_agent_observations, but use direction somehow?
             obs = self.env.agent_peek(agent, self.agent_direction)  # Get the observation in front of the agent
             
-                # Move forward if possible
+            # Move forward if possible
             if self.can_move_forward(obs):
                 self.env.move_agent(agent, self.agent_direction)
             else:
@@ -166,9 +183,75 @@ class Visualizer():
         directions = [Action.NORTH, Action.SOUTH, Action.EAST, Action.WEST]
         directions.remove(current_direction)
         return random.choice(directions)
+    
+
+
+
+    def test_main(self):
+        screen = pygame.display.set_mode((FULL_WIDTH, HEIGHT))
+        pygame.display.set_caption("SLAM Visualizer")
+        screen.fill(WHITE)
+
+        running = True
+
+        # Initialize the agent's direction, assuming it starts facing EAST
+        self.agent_direction = Action.EAST
+        agents = self.env.get_agents()
+        # agent = agents[0]  # Assuming there's at least one agent
+
+
+        # check_env_specs(self.env)
+
+        self.env.reset()
+
+        # Test actions - agent 1 down, agent 2 left
+        actions = TensorDict(
+            {"agents": TensorDict(
+                {"action": torch.tensor([[0, 0, 0, 1, 0], [0, 0, 1, 0, 0]])},
+                batch_size=(),
+                device=self.device)
+            },
+            batch_size=(),
+            device=self.device
+        )
+
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                    pygame.quit()
+                    return
+
+            self.env.step(actions)
+            # print("actions?: {}".format(actions))
+
+            print("reward: {}".format(actions["next", "reward"][0]))
+
+
+            obs_map = actions["next", "agents", "observation"]
+            obs_map = obs_map[0].numpy()
+
+            map = actions["next", "state"]
+            map = map.numpy()
+
+            # map = self.env.get_map()
+            # obs_map = self.env.get_obs_map()
+            self.draw_map(screen, map, agents)
+            self.draw_observation_map(screen, obs_map, agents)
+            pygame.display.update()
+
+            # Adding a small delay can make the agent's movement easier to observe
+            pygame.time.delay(500)
+
+
+
+        # self.env.reset(None)
+
+
 
 if __name__ == "__main__":
     vis = Visualizer()
-    vis.main()
+    # vis.main()
 
+    vis.test_main()
             
