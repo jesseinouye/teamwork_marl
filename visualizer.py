@@ -7,7 +7,8 @@ from torchrl.envs.utils import check_env_specs
 from tensordict import TensorDict, TensorDictBase
 from tensordict.nn import TensorDictModule, TensorDictSequential
 
-from environment_engine import EnvEngine, Action, Agent, CellType
+from environment_engine import EnvEngine, Action, Agent
+from tile import CellType
 
 
 
@@ -106,48 +107,6 @@ class Visualizer():
                 cell_obs_color = self.color_map.get(cell_obs_type, GRAY)
                 pygame.draw.rect(screen, cell_obs_color, (WIDTH + (col * self.cell_size), row * self.cell_size, self.cell_size, self.cell_size))
 
-
-
-    # your original main: 
-                    
-    # def main(self):
-    #     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    #     pygame.display.set_caption("SLAM Visualizer")
-    #     screen.fill(WHITE)
-
-    #     running = True
-    #     i = 0
-    #     while running:
-    #         # print("running iter: {}".format(i))
-    #         for event in pygame.event.get():
-    #             if event.type == pygame.QUIT:
-    #                 running = False
-    #                 pygame.quit()
-    #                 return
-    #             if event.type == pygame.KEYDOWN:
-    #                 print("got keydown")
-    #                 if event.key == pygame.K_LEFT:
-    #                     self.env.move_agent(agents[0], Action.WEST)
-    #                 if event.key == pygame.K_RIGHT:
-    #                     self.env.move_agent(agents[0], Action.EAST)
-    #                 if event.key == pygame.K_UP:
-    #                     self.env.move_agent(agents[0], Action.NORTH)
-    #                 if event.key == pygame.K_DOWN:
-    #                     self.env.move_agent(agents[0], Action.SOUTH)
-                    
-    #                 if event.key == pygame.K_SPACE:
-    #                     print("got space")
-    #                     self.env.place_agents()
-    #                     obs = self.env.calc_agent_observation(agents[0])
-    #                     print("obs: {}".format(obs))
-
-    #         map = self.env.get_map()
-    #         agents = self.env.get_agents()
-
-    #         self.draw_map(screen, map, agents)
-    #         pygame.display.update()
-    #         # pygame.display.flip()
-    #         # i += 1
                     
 
     def main(self):
@@ -202,7 +161,7 @@ class Visualizer():
         print("obs: {}".format(obs))
         if len(obs) == 0:
             return False
-        return (obs[0]['type'] != CellType.WALL and obs[0]['type'] != CellType.OOB)
+        return (obs[0].get_type() != CellType.WALL and obs[0].get_type() != CellType.OOB)
     
 
     def choose_new_direction(self, current_direction):

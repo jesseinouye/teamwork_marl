@@ -14,20 +14,7 @@ from torchrl.data import DiscreteTensorSpec, BoundedTensorSpec, OneHotDiscreteTe
 from torchrl.envs.libs.vmas import VmasEnv
 from torchrl.envs.libs.smacv2 import SMACv2Env
 
-
-# Types of cells
-class CellType(IntEnum):
-    UNDEFINED = 0   # Default
-    FLOOR = 1       # Floor cell
-    WALL = 2        # Wall cell
-    GRASS = 3       # Grass cell
-    WATER = 4       # Water cell
-    OOB = 5         # Out Of Bounds (OOB) cell
-    UNKNOWN = 6     # Agent doesn't know what type
-    AGENT_1 = 7     # Agent 1 in this cell
-    AGENT_2 = 8     # Agent 2 in this cell
-    AGENT_3 = 9     # Agent 3 in this cell
-    AGENT_4 = 10    # Agent 4 in this cell
+from tile import CellType, Tile 
 
 
 # Agent observations
@@ -58,8 +45,13 @@ class Agent():
 
 # Environment engine
 class EnvEngine(EnvBase):
+
+    
     def __init__(self, n_agents=2, device="cpu", map_size=25, agent_abilities=[[1], [1]]) -> None:
         self.map_data = []
+
+        # initialize discovered tiles
+        self.discovered_tiles_num = 0
 
         super().__init__(device=device, batch_size=[])
         
@@ -76,7 +68,7 @@ class EnvEngine(EnvBase):
         self.state_map = copy.deepcopy(self.map)
 
         # Create observation map
-        self.obs_map = [[CellType.UNKNOWN for _ in range(self.cols)] for _ in range(self.rows)]
+        self.obs_map = [[Tile(CellType.UNKNOWN) for _ in range(self.cols)] for _ in range(self.rows)]
         self.obs_map = np.array(self.obs_map)
 
         # List of agents
@@ -181,8 +173,6 @@ class EnvEngine(EnvBase):
         # TODO: set seed for map generation too?
 
 
-
-
     def _step(self, tensordict: TensorDictBase):
         # At each step:
         #   For each agent
@@ -206,12 +196,13 @@ class EnvEngine(EnvBase):
         for i, action in enumerate(acts):
             # print("i: {} / action: {}".format(i, action))
             self.move_agent(self.agents[i], Action(action.item()))
-            agent_obs = self.calc_agent_observation(self.agents[i])
+            agent_obs = self.map_to_numeric(self.calc_agent_observation(self.agents[i]))
             all_agent_obs.append(agent_obs)
 
         all_agent_obs = np.array(all_agent_obs)
         obs = torch.tensor(all_agent_obs)
-        state = torch.tensor(self.state_map)
+
+        state = torch.tensor(self.map_to_numeric(self.state_map))
 
         reward = torch.tensor([self.cur_step_reward], device=self.device, dtype=torch.float32)
 
@@ -254,10 +245,6 @@ class EnvEngine(EnvBase):
         )
         
         return out
-        
-
-
-
 
     def _reset(self, tensordict:TensorDictBase):
         # Clear observed map
@@ -269,17 +256,25 @@ class EnvEngine(EnvBase):
         
         # Move all agents to start
         self.place_agents_at_start()
+        self.numeric_state_map = self.map_to_numeric(self.state_map)
 
         all_agent_obs = []
 
         for agent in self.agents:
-            agent_obs = self.calc_agent_observation(agent)
-            all_agent_obs.append(agent_obs)
+            agent_obs = self.calc_agent_observation(agent)  # this should return a map
+            numeric_agent_obs = self.map_to_numeric(agent_obs)
+            all_agent_obs.append(numeric_agent_obs)  # all_agent_obs should be a list of 2D arrays
 
-        obs = torch.tensor(all_agent_obs)
-        state = torch.tensor(self.state_map)
+        # Convert all_agent_obs to a single numpy array if necessary, depends on your use-case
+        # Example: If agents' observations can be stacked or concatenated
+        # For demonstration, let's assume we stack them along a new axis
+        obs_array = np.stack(all_agent_obs, axis=0)
+        obs = torch.tensor(obs_array, dtype=torch.int32)
+        state = torch.tensor(self.numeric_state_map, dtype=torch.int32)
 
 
+        # obs = torch.tensor(all_agent_obs)
+        # state = torch.tensor(self.state_map)
 
 
         # TODO: fix these to output actual data
@@ -323,20 +318,17 @@ class EnvEngine(EnvBase):
 
         return out
 
-        
-
-
     def get_agent_cell_from_id(self, agent:Agent):
         # Get cell type for agent from ID
         match agent.id:
             case 1:
-                return CellType.AGENT_1
+                return Tile(CellType.AGENT_1)
             case 2:
-                return CellType.AGENT_2
+                return Tile(CellType.AGENT_2)
             case 3:
-                return CellType.AGENT_3
+                return Tile(CellType.AGENT_3)
             case 4:
-                return CellType.AGENT_4
+                return Tile(CellType.AGENT_4)
 
 
     # Load agent with specified abilities
@@ -359,12 +351,12 @@ class EnvEngine(EnvBase):
             print("No agents to place!")
             return False
         
-        starting_pos = (0, 0)
         cur_agent = 0
 
         for row in range(self.rows):
             for col in range(self.cols):
-                if self.map[row, col] == CellType.FLOOR:
+                print("row: {}, col: {}".format(row, col), self.map[row, col])
+                if self.map[row, col].get_type() == CellType.FLOOR:
                     self.agents[cur_agent].position = (row, col)
                     self.state_map[row, col] = self.get_agent_cell_from_id(self.agents[cur_agent])
                     cur_agent += 1
@@ -406,7 +398,7 @@ class EnvEngine(EnvBase):
             # Position is out of bounds
             return False
 
-        match self.map[n_row, n_col]:
+        match self.map[n_row, n_col].get_type():
             case CellType.OOB:
                 # Agent can't move out of bounds
                 return False
@@ -472,38 +464,38 @@ class EnvEngine(EnvBase):
             for d_row in range(1, sight_range+1):
                 n_row = agent_row - d_row
                 if n_row < 0 or n_row >= self.rows:
-                    obs_type = CellType.OOB
+                    obs_tile = Tile(CellType.OOB)
                 else:
-                    obs_type = self.map[n_row, agent_col]
-                    self.obs_map[n_row, agent_col] = obs_type
-                observation.append({'position':(n_row, agent_col), 'type':obs_type})
+                    obs_tile = self.map[n_row, agent_col]
+                    self.obs_map[n_row, agent_col] = obs_tile
+                observation.append({'position':(n_row, agent_col), 'type':obs_tile.get_type()})
         elif dir == Action.SOUTH:
             for d_row in range(1, sight_range+1):
                 n_row = agent_row + d_row
                 if n_row < 0 or n_row >= self.rows:
-                    obs_type = CellType.OOB
+                    obs_tile = Tile(CellType.OOB)
                 else:
-                    obs_type = self.map[n_row, agent_col]
-                    self.obs_map[n_row, agent_col] = obs_type
-                observation.append({'position':(n_row, agent_col), 'type':obs_type})
+                    obs_tile = self.map[n_row, agent_col]
+                    self.obs_map[n_row, agent_col] = obs_tile
+                observation.append({'position':(n_row, agent_col), 'type':obs_tile.get_type()})
         elif dir == Action.EAST:
             for d_col in range(1, sight_range+1):
                 n_col = agent_col + d_col
                 if n_col < 0 or n_col >= self.cols:
-                    obs_type = CellType.OOB
+                    obs_tile = Tile(CellType.OOB)
                 else:
-                    obs_type = self.map[agent_row, n_col]
-                    self.obs_map[agent_row, n_col] = obs_type
-                observation.append({'position':(agent_row, n_col), 'type':obs_type})
+                    obs_tile = self.map[agent_row, n_col]
+                    self.obs_map[agent_row, n_col] = obs_tile
+                observation.append({'position':(agent_row, n_col), 'type':obs_tile.get_type()})
         elif dir == Action.WEST:
             for d_col in range(1, sight_range+1):
                 n_col = agent_col - d_col
                 if n_col < 0 or n_col >= self.cols:
-                    obs_type = CellType.OOB
+                    obs_tile = Tile(CellType.OOB)
                 else:
-                    obs_type = self.map[agent_row, n_col]
-                    self.obs_map[agent_row, n_col] = obs_type
-                observation.append({'position':(agent_row, n_col), 'type':obs_type})
+                    obs_tile = self.map[agent_row, n_col]
+                    self.obs_map[agent_row, n_col] = obs_tile
+                observation.append({'position':(agent_row, n_col), 'type':obs_tile.get_type()})
 
 
         # for obs in observation:
@@ -538,11 +530,12 @@ class EnvEngine(EnvBase):
                     continue
                 
                 # Calc +row, +col
+                print("Agent position: {}".format(agent.position) , "d_row: {}, d_col: {}".format(d_row, d_col))
                 n_row, n_col = agent.position[0] + d_row, agent.position[1] + d_col
 
                 # Check if position is in bounds, otherwise mark OOB
                 if 0 <= n_row < self.cols and 0 <= n_col < self.rows:
-                    if self.obs_map[n_row, n_col] == CellType.UNKNOWN:
+                    if self.obs_map[n_row, n_col].get_type() == CellType.UNKNOWN:
                         self.obs_map[n_row, n_col] = self.map[n_row, n_col]
                         self.cur_step_reward += 1
                 else:
@@ -554,7 +547,7 @@ class EnvEngine(EnvBase):
                     n_row, n_col = agent.position[0] + d_row, agent.position[1] - d_col
 
                     if 0 <= n_row < self.cols and 0 <= n_col < self.rows:
-                        if self.obs_map[n_row, n_col] == CellType.UNKNOWN:
+                        if self.obs_map[n_row, n_col].get_type() == CellType.UNKNOWN:
                             self.obs_map[n_row, n_col] = self.map[n_row, n_col]
                             self.cur_step_reward += 1
                     else:
@@ -566,7 +559,7 @@ class EnvEngine(EnvBase):
                     n_row, n_col = agent.position[0] - d_row, agent.position[1] + d_col
 
                     if 0 <= n_row < self.cols and 0 <= n_col < self.rows:
-                        if self.obs_map[n_row, n_col] == CellType.UNKNOWN:
+                        if self.obs_map[n_row, n_col].get_type() == CellType.UNKNOWN:
                             self.obs_map[n_row, n_col] = self.map[n_row, n_col]
                             self.cur_step_reward += 1
                     else:
@@ -578,7 +571,7 @@ class EnvEngine(EnvBase):
                         n_row, n_col = agent.position[0] - d_row, agent.position[1] - d_col
 
                         if 0 <= n_row < self.cols and 0 <= n_col < self.rows:
-                            if self.obs_map[n_row, n_col] == CellType.UNKNOWN:
+                            if self.obs_map[n_row, n_col].get_type() == CellType.UNKNOWN:
                                 self.obs_map[n_row, n_col] = self.map[n_row, n_col]
                                 self.cur_step_reward += 1
                         else:
@@ -589,58 +582,19 @@ class EnvEngine(EnvBase):
 
         # Set agent position
         tmp_obs_map[agent.position[0], agent.position[1]] = self.get_agent_cell_from_id(agent)
-
-        torch.tensor(tmp_obs_map)
+        observation_array = self.map_to_numeric(tmp_obs_map)
+        torch.tensor(observation_array)
         
         return tmp_obs_map
+    
+    def map_to_numeric(self, map_data):
+        return np.array([[tile.get_type().value for tile in row] for row in map_data], dtype=np.int32)
 
 
-    # # Generate a map using random walk with weighted directions
-    # # (prefers direction it previously went to create hallways)
-    # def generate_map_random_walk(self):
-    #     print("Generating map")
-    #     dirs = [(0, -1), (0, 1), (1, 0), (-1, 0)]
-    #     dirs_idx = [0, 1, 2, 3]
-    #     random.shuffle(dirs)
-    #     prev_dir = random.randint(0, 3)
-
-    #     weights_base = [0.1, 0.1, 0.1, 0.1]
-
-    #     map = [[CellType.WALL for _ in range(self.cols)] for _ in range(self.rows)]
-
-    #     current_pos = (random.randint(0, self.cols - 1), random.randint(0, self.rows - 1))
-
-    #     all_dirs = []
-    #     floor_count = 1
-    #     target_floor_count = self.rows * self.cols * 0.60  # Adjust floor target as needed
-
-    #     while floor_count < target_floor_count:
-    #         x, y = current_pos
-    #         weights = weights_base.copy()
-    #         weights[prev_dir] = 0.7  # Heavily prioritizes straight lines
-
-    #         new_dir_idx = random.choices(dirs_idx, weights)[0]
-    #         dx, dy = dirs[new_dir_idx]
-    #         nx, ny = x + dx, y + dy
-
-    #         if 0 <= nx < self.cols and 0 <= ny < self.rows:
-    #             if map[ny][nx] == CellType.WALL:
-    #                 floor_count += 1
-    #                 map[ny][nx] = CellType.FLOOR  # Mark as floor
-    #             current_pos = (nx, ny)
-    #         prev_dir = new_dir_idx
-
-    #     # Additional step to introduce GRASS and WATER
-       
-    #     for _ in range(int(self.rows * self.cols * 0.15)):  # Adjust grass/water target as needed
-    #         for cell_type in [CellType.GRASS, CellType.WATER]:
-    #             gx, gy = random.randint(0, self.cols - 1), random.randint(0, self.rows - 1)
-    #             map[gy][gx] = cell_type
-
-    #     print("dir counts: {}".format(Counter(all_dirs)))
-    #     self.map = map
-    #     return map
-
+    # def convert_to_numpy(self, tmp_obs_map):
+    #     # Extracting cell_type.value from each Tile in tmp_obs_map
+    #     map_array = [[tile.get_type().value for tile in row] for row in tmp_obs_map]
+    #     return np.array(map_array, dtype=np.int32)
 
     def clear_state_map(self):
         # Clear the state map
@@ -649,7 +603,7 @@ class EnvEngine(EnvBase):
 
     def clear_obs_map(self):
         # Clear the observed map
-        self.obs_map[:] = CellType.UNKNOWN
+        self.obs_map[:] = Tile(CellType.UNKNOWN)
 
 
     def generate_map(self):
@@ -668,17 +622,17 @@ class EnvEngine(EnvBase):
     
     # Randomly assign base terrain types (floor or wall) to each cell
     def initialize_base_terrain(self):
-        new_map = [[CellType.FLOOR for _ in range(self.cols)] for _ in range(self.rows)]
+        new_map = [[Tile(CellType.FLOOR) for _ in range(self.cols)] for _ in range(self.rows)]
         for y in range(self.rows):
             for x in range(self.cols):
-                new_map[y][x] = random.choice([CellType.FLOOR, CellType.WALL])
+                new_map[y][x] = random.choice([Tile(CellType.FLOOR), Tile(CellType.WALL)])
         return new_map
 
     # Smooth and cluster terrain using cellular automata rules  
     def apply_cellular_automata(self):
         for iteration in range(5):
             # This map will store the results of applying the cellular automata rules for the current iteration
-            new_map = [[CellType.WALL for _ in range(self.cols)] for _ in range(self.rows)]
+            new_map = [[Tile(CellType.WALL) for _ in range(self.cols)] for _ in range(self.rows)]
             for y in range(self.rows):
                 for x in range(self.cols):
                     # This line calculates the number of neighboring cells that are floors (CellType.FLOOR). 
@@ -692,11 +646,11 @@ class EnvEngine(EnvBase):
                         if 0 <= x + dx < self.cols and 0 <= y + dy < self.rows
 
                          # checks if the neighboring cell is a floor. The sum of these checks gives the total count of floor neighbors.
-                        and self.map[y + dy][x + dx] == CellType.FLOOR
+                        and self.map[y + dy][x + dx].get_type() == CellType.FLOOR
                     )
                     
-                    if floor_neighbors >= 5 or self.map[y][x] == CellType.FLOOR and floor_neighbors >= 4:
-                        new_map[y][x] = CellType.FLOOR
+                    if floor_neighbors >= 5 or self.map[y][x].get_type() == CellType.FLOOR and floor_neighbors >= 4:
+                        new_map[y][x]= Tile(CellType.FLOOR)
             self.map = new_map
 
         # TODO: add a check somewhere around here so there are no sections connected only by diagonal cells (i.e. sections that can't be reached)
@@ -707,7 +661,7 @@ class EnvEngine(EnvBase):
             start_x, start_y = random.randint(0, self.cols - 1), random.randint(0, self.rows - 1)
             for _ in range(size):
                 if 0 <= start_x < self.cols and 0 <= start_y < self.rows:
-                    self.map[start_y][start_x] = feature_type
+                    self.map[start_y][start_x] = Tile(feature_type)
                 # Randomly move the "cluster seed" to simulate natural spreading
                 start_x += random.choice([-1, 0, 1])
                 start_y += random.choice([-1, 0, 1])
@@ -718,9 +672,9 @@ class EnvEngine(EnvBase):
         region_id = 1
         for y in range(self.rows):
             for x in range(self.cols):
-                if self.map[y][x] == CellType.FLOOR and (x, y) not in regions:
+                if self.map[y][x].get_type() == CellType.FLOOR and (x, y) not in regions:
                     # Use flood fill to find and label all cells in this region
-                    self.flood_fill(self.map, x, y, CellType.FLOOR, region_id, regions)
+                    self.flood_fill(self.map, x, y, Tile(CellType.FLOOR), region_id, regions)
                     region_id += 1
 
         # If there's only one region, or none, no need to connect anything
@@ -735,9 +689,9 @@ class EnvEngine(EnvBase):
             self.connect_regions(edge_cells[i], edge_cells[i + 1])
 
     def flood_fill(self, map, x, y, target_type, region_id, regions):
-        if x < 0 or x >= self.cols or y < 0 or y >= self.rows or map[y][x] != target_type or (x, y) in regions:
+        if x < 0 or x >= self.cols or y < 0 or y >= self.rows or map[y][x].get_type() != target_type or (x, y) in regions:
             return
-        regions[(x, y)] = region_id
+        regions[(x, y)] = Tile(region_id)
         directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
         for dx, dy in directions:
             self.flood_fill(map, x + dx, y + dy, target_type, region_id, regions)
@@ -745,26 +699,26 @@ class EnvEngine(EnvBase):
     def find_edge_cells(self, regions, region_id):
         edge_cells = {rid: [] for rid in range(1, region_id)}
         for (x, y), rid in regions.items():
-            # Check each neighboring cell to determine if the current cell is an edge cell
             for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
                 nx, ny = x + dx, y + dy
-                # Ensure the neighboring cell is within the map boundaries
                 if 0 <= nx < self.cols and 0 <= ny < self.rows:
-                    if self.map[ny][nx] == CellType.WALL or (nx, ny) not in regions:
+                    if self.map[ny][nx].cell_type == CellType.WALL or (nx, ny) not in regions:
                         edge_cells[rid].append((x, y))
-                        break  # No need to check other neighbors once we know this is an edge cell
+                        break
                 else:
-                    # The neighboring cell is out of bounds, which also makes this an edge cell
                     edge_cells[rid].append((x, y))
-                    break  # No need to check other neighbors
+                    break
+            # Debug print to check if edge cells are being populated
+            print(f"Region {rid}, Edge Cells: {edge_cells[rid]}")
         return edge_cells
 
 
     def connect_regions(self, region1, region2):
-        # For simplicity, connect the first edge cell of region1 to the first edge cell of region2
+        if not region1 or not region2:
+            print("One or both regions have no edge cells to connect.")
+            return  # Exit if there's nothing to connect
         start = region1[0]
         end = region2[0]
-        # Implement path carving between start and end. You can use Bresenham's line algorithm or a simple direct path.
         self.carve_path(start, end)
 
     def carve_path(self, start, end):
@@ -779,7 +733,7 @@ class EnvEngine(EnvBase):
         while True:
             # Convert the cell to a floor to create a path
             if 0 <= x0 < self.cols and 0 <= y0 < self.rows:
-                self.map[y0][x0] = CellType.FLOOR
+                self.map[y0][x0] = Tile(CellType.FLOOR)
             if x0 == x1 and y0 == y1:
                 break
             e2 = 2 * err
@@ -803,8 +757,8 @@ class EnvEngine(EnvBase):
         return self.agents
     
     def is_done(self):
-        # Check if all agents have reached their goal
-        pass
+        total_tiles = self.rows * self.cols
+        return self.discovered_tiles_num >= total_tiles
 
     def evaluate_map(self):
         # Evaluate the quality of the map produced by the agents
