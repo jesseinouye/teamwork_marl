@@ -1,14 +1,22 @@
-# import numpy
-# import pygame
 import random
 import copy
-from typing import List
-from enum import Enum
+import torch
+import numpy as np
+from typing import List, Optional
+from enum import Enum, IntEnum
 from collections import Counter
+
+from tensordict import TensorDict, TensorDictBase
+
+from torchrl.envs import EnvBase
+from torchrl.data import DiscreteTensorSpec, BoundedTensorSpec, OneHotDiscreteTensorSpec, UnboundedContinuousTensorSpec, CompositeSpec
+
+from torchrl.envs.libs.vmas import VmasEnv
+from torchrl.envs.libs.smacv2 import SMACv2Env
 
 
 # Types of cells
-class CellType(Enum):
+class CellType(IntEnum):
     UNDEFINED = 0   # Default
     FLOOR = 1       # Floor cell
     WALL = 2        # Wall cell
@@ -16,6 +24,10 @@ class CellType(Enum):
     WATER = 4       # Water cell
     OOB = 5         # Out Of Bounds (OOB) cell
     UNKNOWN = 6     # Agent doesn't know what type
+    AGENT_1 = 7     # Agent 1 in this cell
+    AGENT_2 = 8     # Agent 2 in this cell
+    AGENT_3 = 9     # Agent 3 in this cell
+    AGENT_4 = 10    # Agent 4 in this cell
 
 
 # Agent observations
@@ -45,30 +57,300 @@ class Agent():
 
 
 # Environment engine
-class EnvEngine():
-    def __init__(self) -> None:
+class EnvEngine(EnvBase):
+    def __init__(self, n_agents=2, device="cpu", map_size=25, agent_abilities=[[1], [1]]) -> None:
         self.map_data = []
+
+        super().__init__(device=device, batch_size=[])
         
         # Parameters
-        self.rows = 25
-        self.cols = 25
+        self.rows = map_size
+        self.cols = map_size    # TODO: change this to allow rectangles?
 
         self.agent_obs_dist = 3
 
-        self.map = None
-        self.obs_map = None
+        # Generate map
+        self.map = self.generate_map()
+
+        # Create state map (contains agent locations)
+        self.state_map = copy.deepcopy(self.map)
+
+        # Create observation map
+        self.obs_map = [[CellType.UNKNOWN for _ in range(self.cols)] for _ in range(self.rows)]
+        self.obs_map = np.array(self.obs_map)
+
+        # List of agents
         self.agents  : List[Agent] = []
+        
+        self.n_agents = n_agents
+        self.n_actions = len(Action)
+
+        if len(agent_abilities) != n_agents:
+            raise ValueError("ERROR: length of agent ability list (agent_abilities) must match number of agents (n_agents)")
+
+        for i in range(n_agents):
+            self.load_agent(abilities=agent_abilities[i])
+
+        # TODO: figure out how to define this - determined by whether we use a CNN or flattened tensor?
+        self.obs_size = self.rows * self.cols
+
+        self.cur_step_reward = 0
+
+        # Make spec for action and observation
+        self._make_spec()
+
+
+    def _make_spec(self):
+        self.action_spec = self._make_action_spec()
+        self.observation_spec = self._make_observation_spec()
+
+        self.reward_spec = UnboundedContinuousTensorSpec(
+            shape=torch.Size((1,)),
+            device=self.device
+        )
+
+        self.done_spec = DiscreteTensorSpec(
+            n=2,
+            shape=torch.Size((1,)),
+            dtype=torch.bool,
+            device=self.device
+        )
+
+    def _make_action_spec(self) -> CompositeSpec:
+        action_spec = OneHotDiscreteTensorSpec(
+            self.n_actions,
+            shape=torch.Size((self.n_agents, self.n_actions)),
+            device=self.device,
+            dtype=torch.long,
+        )
+
+        full_action_spec = CompositeSpec(
+            {
+                "agents": CompositeSpec(
+                    {"action": action_spec}, shape=torch.Size((self.n_agents,))
+                )
+            }
+        )
+        return full_action_spec
+    
+    def _make_observation_spec(self) -> CompositeSpec:
+        obs_spec = DiscreteTensorSpec(
+            n=len(CellType),
+            # shape=torch.Size((self.n_agents, self.obs_size)),
+            shape=torch.Size((self.n_agents, self.rows, self.cols)),
+            dtype=torch.int,
+            device=self.device
+        )
+        info_spec = CompositeSpec(
+            {
+                "episode_limit": DiscreteTensorSpec(
+                    2, dtype=torch.bool, device=self.device
+                ),
+                "map_explored": DiscreteTensorSpec(
+                    2, dtype=torch.bool, device=self.device
+                )
+            }
+        )
+        mask_spec = DiscreteTensorSpec(
+            2,
+            torch.Size((self.n_agents, self.n_actions)),
+            device=self.device,
+            dtype=torch.bool
+        )
+        spec = CompositeSpec(
+            {
+                "agents": CompositeSpec(
+                    {"observation": obs_spec, "action_mask": mask_spec},
+                    shape=torch.Size((self.n_agents,))
+                ),
+                "state": DiscreteTensorSpec(
+                    n=len(CellType),
+                    # shape=torch.Size((self.n_agents, self.obs_size)),
+                    shape=torch.Size((self.rows, self.cols)),
+                    dtype=torch.int,
+                    device=self.device
+                ),
+                "info": info_spec
+            }
+        )
+        return spec
+
+    def _set_seed(self, seed: Optional[int]):
+        rng = torch.manual_seed(seed)
+        self.rng = rng
+        # TODO: set seed for map generation too?
+
+
+
+
+    def _step(self, tensordict: TensorDictBase):
+        # At each step:
+        #   For each agent
+        #   - Take agent action (figure out how all agent actions are passed in tensordict?)
+        #   - Move agent based on action
+        #   - Determine observation
+
+        #   After all agent actions done
+        #   - Calculate reward from observation and prev observed map?
+        #   - Update observed map
+        
+        actions = tensordict["agents", "action"]
+
+        # Get decoded movements from one-hot tensor
+        acts = torch.argmax(actions, dim=1)
+
+        all_agent_obs = []
+        self.cur_step_reward = 0
+
+        # Move each agent in order
+        for i, action in enumerate(acts):
+            # print("i: {} / action: {}".format(i, action))
+            self.move_agent(self.agents[i], Action(action.item()))
+            agent_obs = self.calc_agent_observation(self.agents[i])
+            all_agent_obs.append(agent_obs)
+
+        all_agent_obs = np.array(all_agent_obs)
+        obs = torch.tensor(all_agent_obs)
+        state = torch.tensor(self.state_map)
+
+        reward = torch.tensor([self.cur_step_reward], device=self.device, dtype=torch.float32)
+
+        # TODO: Calculate if done
+        done = torch.tensor([0])
+
+
+        # TODO: fix these to output actual data
+        #       should match format of observation spec ?
+
+        # obs = torch.zeros(self.n_agents, self.obs_size)
+        mask = actions
+
+        # state = torch.zeros(self.n_agents, self.obs_size)
+
+        agents_td = TensorDict(
+            {"observation": obs, "action_mask": mask}, batch_size=(self.n_agents,)
+        )
+
+        info = TensorDict(
+            source={
+                "episode_limit": torch.tensor([0]),
+                "map_explored": torch.tensor([0])
+            },
+            batch_size=(),
+            device=self.device
+        )
+
+        out = TensorDict(
+            source={
+                "agents": agents_td,
+                "state": state,
+                "info": info,
+                "reward": reward,
+                "done": done,
+                "terminated": done.clone()
+            },
+            batch_size=(),
+            device=self.device
+        )
+        
+        return out
+        
+
+
+
+
+    def _reset(self, tensordict:TensorDictBase):
+        # Clear observed map
+        # Move all agents to start (upper left corner)
+
+        # Clear observed and state maps
+        self.clear_obs_map()
+        self.clear_state_map()
+        
+        # Move all agents to start
+        self.place_agents_at_start()
+
+        all_agent_obs = []
+
+        for agent in self.agents:
+            agent_obs = self.calc_agent_observation(agent)
+            all_agent_obs.append(agent_obs)
+
+        obs = torch.tensor(all_agent_obs)
+        state = torch.tensor(self.state_map)
+
+
+
+
+        # TODO: fix these to output actual data
+        #       should match format of observation spec ?
+
+        # obs = torch.zeros(self.n_agents, self.obs_size)
+        # tmp_mask = [[1, 0, 0, 0, 0]] * self.n_agents
+        mask = torch.tensor([[1, 0, 0, 0, 0]] * self.n_agents)
+        # mask = torch.tensor([[1, 0, 0, 0, 0], [1, 0, 0, 0, 0]])
+
+        # state = torch.zeros(self.n_agents, self.obs_size)
+
+        agents_td = TensorDict(
+            {"observation": obs, "action_mask": mask}, batch_size=(self.n_agents,)
+        )
+
+        info = TensorDict(
+            source={
+                "episode_limit": torch.tensor([0]),
+                "map_explored": torch.tensor([0])
+            },
+            batch_size=(),
+            device=self.device
+        )
+
+        reward = torch.tensor([1])
+        done = torch.tensor([0])
+
+        out = TensorDict(
+            source={
+                "agents": agents_td,
+                "state": state,
+                "info": info,
+                "reward": reward,
+                "done": done,
+                "terminated": done.clone()
+            },
+            batch_size=(),
+            device=self.device
+        )
+
+        return out
+
+        
+
+
+    def get_agent_cell_from_id(self, agent:Agent):
+        # Get cell type for agent from ID
+        match agent.id:
+            case 1:
+                return CellType.AGENT_1
+            case 2:
+                return CellType.AGENT_2
+            case 3:
+                return CellType.AGENT_3
+            case 4:
+                return CellType.AGENT_4
+
 
     # Load agent with specified abilities
     # let's say we let agent go on floor, grass, and water
     def load_agent(self, abilities=[1, 3, 4]):
         # NOTE: as of now, abilities MUST contain '1' for normal floors
         # agent = {'id': len(self.agents)+1, 'abilities':abilities, 'position': None}
+
+        # TODO: change this so all agents have ability '1' (FLOOR) by default
         agent = Agent(id=len(self.agents)+1, abilities=abilities, position=None)
         self.agents.append(agent)
 
     # Place agents in top left-most open blocks
-    def place_agents(self):
+    def place_agents_at_start(self):
         if self.map is None:
             print("No map generated!")
             return False
@@ -82,8 +364,9 @@ class EnvEngine():
 
         for row in range(self.rows):
             for col in range(self.cols):
-                if self.map[row][col] == CellType.FLOOR:
+                if self.map[row, col] == CellType.FLOOR:
                     self.agents[cur_agent].position = (row, col)
+                    self.state_map[row, col] = self.get_agent_cell_from_id(self.agents[cur_agent])
                     cur_agent += 1
                     if cur_agent >= len(self.agents):
                         return
@@ -111,7 +394,9 @@ class EnvEngine():
 
             # Correctly call and use the result of check_agent_ability
             if self.check_agent_ability(agent, dir, n_row, n_col):
+                self.state_map[agent.position] = self.map[agent.position]
                 agent.position = (n_row, n_col)
+                self.state_map[agent.position] = self.get_agent_cell_from_id(agent)
         else:
             print(f"Invalid direction {dir}")
 
@@ -121,7 +406,7 @@ class EnvEngine():
             # Position is out of bounds
             return False
 
-        match self.map[n_row][n_col]:
+        match self.map[n_row, n_col]:
             case CellType.OOB:
                 # Agent can't move out of bounds
                 return False
@@ -189,8 +474,8 @@ class EnvEngine():
                 if n_row < 0 or n_row >= self.rows:
                     obs_type = CellType.OOB
                 else:
-                    obs_type = self.map[n_row][agent_col]
-                    self.obs_map[n_row][agent_col] = obs_type
+                    obs_type = self.map[n_row, agent_col]
+                    self.obs_map[n_row, agent_col] = obs_type
                 observation.append({'position':(n_row, agent_col), 'type':obs_type})
         elif dir == Action.SOUTH:
             for d_row in range(1, sight_range+1):
@@ -198,8 +483,8 @@ class EnvEngine():
                 if n_row < 0 or n_row >= self.rows:
                     obs_type = CellType.OOB
                 else:
-                    obs_type = self.map[n_row][agent_col]
-                    self.obs_map[n_row][agent_col] = obs_type
+                    obs_type = self.map[n_row, agent_col]
+                    self.obs_map[n_row, agent_col] = obs_type
                 observation.append({'position':(n_row, agent_col), 'type':obs_type})
         elif dir == Action.EAST:
             for d_col in range(1, sight_range+1):
@@ -207,8 +492,8 @@ class EnvEngine():
                 if n_col < 0 or n_col >= self.cols:
                     obs_type = CellType.OOB
                 else:
-                    obs_type = self.map[agent_row][n_col]
-                    self.obs_map[agent_row][n_col] = obs_type
+                    obs_type = self.map[agent_row, n_col]
+                    self.obs_map[agent_row, n_col] = obs_type
                 observation.append({'position':(agent_row, n_col), 'type':obs_type})
         elif dir == Action.WEST:
             for d_col in range(1, sight_range+1):
@@ -216,8 +501,8 @@ class EnvEngine():
                 if n_col < 0 or n_col >= self.cols:
                     obs_type = CellType.OOB
                 else:
-                    obs_type = self.map[agent_row][n_col]
-                    self.obs_map[agent_row][n_col] = obs_type
+                    obs_type = self.map[agent_row, n_col]
+                    self.obs_map[agent_row, n_col] = obs_type
                 observation.append({'position':(agent_row, n_col), 'type':obs_type})
 
 
@@ -240,13 +525,16 @@ class EnvEngine():
         pass
 
     def calc_agent_observation(self, agent:Agent):
-        obs = []
+        # Calculate observation for a specific agent
+
+        # TODO: add logic to prevent looking through walls
 
         for d_row in range(agent.rangeOfSight+1):
             for d_col in range(agent.rangeOfSight+1):
                 if d_row == 0 and d_col == 0:
-                    n_row, n_col = agent.position[0] + d_row, agent.position[1] + d_col
-                    obs.append({'cell_pos':(n_row, n_col), 'type':self.map[n_row][n_col]})    
+                    # Agent's new position, observation already seen
+                    # n_row, n_col = agent.position[0] + d_row, agent.position[1] + d_col
+                    # self.obs_map[n_row, n_col] = self.map[n_row, n_col]
                     continue
                 
                 # Calc +row, +col
@@ -254,46 +542,57 @@ class EnvEngine():
 
                 # Check if position is in bounds, otherwise mark OOB
                 if 0 <= n_row < self.cols and 0 <= n_col < self.rows:
-                    obs.append({'cell_pos':(n_row, n_col), 'type':self.map[n_row][n_col]})
+                    if self.obs_map[n_row, n_col] == CellType.UNKNOWN:
+                        self.obs_map[n_row, n_col] = self.map[n_row, n_col]
+                        self.cur_step_reward += 1
                 else:
-                    obs.append({'cell_pos':(n_row, n_col), 'type':CellType.OOB})
-
-                # # Calc -row, -col
-                # n_row, n_col = agent.position[0] - d_row, agent.position[1] - d_col
-
-                # if 0 <= n_row < self.cols and 0 <= n_col < self.rows:
-                #     obs.append({'cell_pos':(n_row, n_col), 'type':self.map[n_row][n_col]})
-                # else:
-                #     obs.append({'cell_pos':(n_row, n_col), 'type':CellType.OOB})
+                    # OOB case
+                    pass
 
                 # If col change not 0, calc +row, -col
                 if d_col != 0:
                     n_row, n_col = agent.position[0] + d_row, agent.position[1] - d_col
 
                     if 0 <= n_row < self.cols and 0 <= n_col < self.rows:
-                        obs.append({'cell_pos':(n_row, n_col), 'type':self.map[n_row][n_col]})
+                        if self.obs_map[n_row, n_col] == CellType.UNKNOWN:
+                            self.obs_map[n_row, n_col] = self.map[n_row, n_col]
+                            self.cur_step_reward += 1
                     else:
-                        obs.append({'cell_pos':(n_row, n_col), 'type':CellType.OOB})
+                        # OOB case
+                        pass
 
                 # If row change not 0, calc -row, +col
                 if d_row != 0:
                     n_row, n_col = agent.position[0] - d_row, agent.position[1] + d_col
 
                     if 0 <= n_row < self.cols and 0 <= n_col < self.rows:
-                        obs.append({'cell_pos':(n_row, n_col), 'type':self.map[n_row][n_col]})
+                        if self.obs_map[n_row, n_col] == CellType.UNKNOWN:
+                            self.obs_map[n_row, n_col] = self.map[n_row, n_col]
+                            self.cur_step_reward += 1
                     else:
-                        obs.append({'cell_pos':(n_row, n_col), 'type':CellType.OOB})
+                        # OOB case
+                        pass
 
                     # If col change not 0, calc -row, -col
                     if d_col != 0:
                         n_row, n_col = agent.position[0] - d_row, agent.position[1] - d_col
 
                         if 0 <= n_row < self.cols and 0 <= n_col < self.rows:
-                            obs.append({'cell_pos':(n_row, n_col), 'type':self.map[n_row][n_col]})
+                            if self.obs_map[n_row, n_col] == CellType.UNKNOWN:
+                                self.obs_map[n_row, n_col] = self.map[n_row, n_col]
+                                self.cur_step_reward += 1
                         else:
-                            obs.append({'cell_pos':(n_row, n_col), 'type':CellType.OOB})
+                            # OOB case
+                            pass
 
-        return obs
+        tmp_obs_map = copy.deepcopy(self.obs_map)
+
+        # Set agent position
+        tmp_obs_map[agent.position[0], agent.position[1]] = self.get_agent_cell_from_id(agent)
+
+        torch.tensor(tmp_obs_map)
+        
+        return tmp_obs_map
 
 
     # # Generate a map using random walk with weighted directions
@@ -342,6 +641,17 @@ class EnvEngine():
     #     self.map = map
     #     return map
 
+
+    def clear_state_map(self):
+        # Clear the state map
+        self.state_map = copy.deepcopy(self.map)
+
+
+    def clear_obs_map(self):
+        # Clear the observed map
+        self.obs_map[:] = CellType.UNKNOWN
+
+
     def generate_map(self):
         print("Generating map")
         map = self.initialize_base_terrain()
@@ -351,8 +661,7 @@ class EnvEngine():
         self.add_clustered_features(CellType.WATER, 2, 15)  # 2 clusters, each with 15 cells
         self.ensure_connectivity()
 
-        # Create observation map
-        self.obs_map = [[CellType.UNKNOWN for _ in range(self.cols)] for _ in range(self.rows)]
+        self.map = np.array(self.map)
 
         print("Map generation complete")
         return self.map
@@ -372,9 +681,9 @@ class EnvEngine():
             new_map = [[CellType.WALL for _ in range(self.cols)] for _ in range(self.rows)]
             for y in range(self.rows):
                 for x in range(self.cols):
-        # This line calculates the number of neighboring cells that are floors (CellType.FLOOR). 
-        # It uses a generator expression within the sum() function to add 1 for each neighboring cell that is a floor.
-        # dx and dy are used to check all adjacent cells (including diagonals) around the current cell (x, y). 
+                    # This line calculates the number of neighboring cells that are floors (CellType.FLOOR). 
+                    # It uses a generator expression within the sum() function to add 1 for each neighboring cell that is a floor.
+                    # dx and dy are used to check all adjacent cells (including diagonals) around the current cell (x, y). 
                     floor_neighbors = sum(
                         1
                         for dy in range(-1, 2)
@@ -389,6 +698,8 @@ class EnvEngine():
                     if floor_neighbors >= 5 or self.map[y][x] == CellType.FLOOR and floor_neighbors >= 4:
                         new_map[y][x] = CellType.FLOOR
             self.map = new_map
+
+        # TODO: add a check somewhere around here so there are no sections connected only by diagonal cells (i.e. sections that can't be reached)
 
     # Add feature features in clusters    
     def add_clustered_features(self, feature_type, clusters, size):
