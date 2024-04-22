@@ -82,7 +82,6 @@ class EnvEngine(EnvBase):
         # List of agents
         self.agents  : List[Agent] = []
         
-        # TODO: set number of agents and agent abilities at initialization of env (as input to __init__)
         self.n_agents = n_agents
         self.n_actions = len(Action)
 
@@ -164,7 +163,7 @@ class EnvEngine(EnvBase):
                     {"observation": obs_spec, "action_mask": mask_spec},
                     shape=torch.Size((self.n_agents,))
                 ),
-                "state": DiscreteTensorSpec(        # TODO: figure out what the state is supposed to be
+                "state": DiscreteTensorSpec(
                     n=len(CellType),
                     # shape=torch.Size((self.n_agents, self.obs_size)),
                     shape=torch.Size((self.rows, self.cols)),
