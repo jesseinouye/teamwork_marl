@@ -58,13 +58,14 @@ class Agent():
 
 # Environment engine
 class EnvEngine(EnvBase):
-    def __init__(self, device="cpu") -> None:
+    def __init__(self, n_agents=2, device="cpu", map_size=25, agent_abilities=[[1], [1]]) -> None:
         self.map_data = []
 
         super().__init__(device=device, batch_size=[])
+        
         # Parameters
-        self.rows = 25
-        self.cols = 25
+        self.rows = map_size
+        self.cols = map_size    # TODO: change this to allow rectangles?
 
         self.agent_obs_dist = 3
 
@@ -82,20 +83,21 @@ class EnvEngine(EnvBase):
         self.agents  : List[Agent] = []
         
         # TODO: set number of agents and agent abilities at initialization of env (as input to __init__)
-        self.n_agents = 2
+        self.n_agents = n_agents
         self.n_actions = len(Action)
+
+        if len(agent_abilities) != n_agents:
+            raise ValueError("ERROR: length of agent ability list (agent_abilities) must match number of agents (n_agents)")
+
+        for i in range(n_agents):
+            self.load_agent(abilities=agent_abilities[i])
 
         # TODO: figure out how to define this - determined by whether we use a CNN or flattened tensor?
         self.obs_size = self.rows * self.cols
 
         self.cur_step_reward = 0
 
-        # self.device = devi
-
-        self.base_map = [[CellType.UNKNOWN for _ in range(self.cols)] for _ in range(self.rows)]
-
-
-
+        # Make spec for action and observation
         self._make_spec()
 
 
@@ -212,11 +214,10 @@ class EnvEngine(EnvBase):
         obs = torch.tensor(all_agent_obs)
         state = torch.tensor(self.state_map)
 
-        # TODO: Calculate reward
         reward = torch.tensor([self.cur_step_reward], device=self.device, dtype=torch.float32)
-        done = torch.tensor([0])
 
         # TODO: Calculate if done
+        done = torch.tensor([0])
 
 
         # TODO: fix these to output actual data
@@ -239,9 +240,6 @@ class EnvEngine(EnvBase):
             batch_size=(),
             device=self.device
         )
-
-        # reward = torch.tensor([1])
-        # done = torch.tensor([0])
 
         out = TensorDict(
             source={
@@ -289,7 +287,9 @@ class EnvEngine(EnvBase):
         #       should match format of observation spec ?
 
         # obs = torch.zeros(self.n_agents, self.obs_size)
-        mask = torch.tensor([[1, 0, 0, 0, 0], [1, 0, 0, 0, 0]])
+        # tmp_mask = [[1, 0, 0, 0, 0]] * self.n_agents
+        mask = torch.tensor([[1, 0, 0, 0, 0]] * self.n_agents)
+        # mask = torch.tensor([[1, 0, 0, 0, 0], [1, 0, 0, 0, 0]])
 
         # state = torch.zeros(self.n_agents, self.obs_size)
 
@@ -345,6 +345,8 @@ class EnvEngine(EnvBase):
     def load_agent(self, abilities=[1, 3, 4]):
         # NOTE: as of now, abilities MUST contain '1' for normal floors
         # agent = {'id': len(self.agents)+1, 'abilities':abilities, 'position': None}
+
+        # TODO: change this so all agents have ability '1' (FLOOR) by default
         agent = Agent(id=len(self.agents)+1, abilities=abilities, position=None)
         self.agents.append(agent)
 
@@ -697,6 +699,8 @@ class EnvEngine(EnvBase):
                     if floor_neighbors >= 5 or self.map[y][x] == CellType.FLOOR and floor_neighbors >= 4:
                         new_map[y][x] = CellType.FLOOR
             self.map = new_map
+
+        # TODO: add a check somewhere around here so there are no sections connected only by diagonal cells (i.e. sections that can't be reached)
 
     # Add feature features in clusters    
     def add_clustered_features(self, feature_type, clusters, size):
