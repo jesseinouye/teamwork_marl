@@ -490,7 +490,14 @@ class EnvEngine():
     # Get agent data
     def get_agents(self):
         return self.agents
+    
+    def is_done(self):
+        # Check if all agents have reached their goal
+        pass
 
+    def evaluate_map(self):
+        # Evaluate the quality of the map produced by the agents
+        pass 
 
 
 
