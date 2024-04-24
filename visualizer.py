@@ -39,10 +39,10 @@ class Visualizer():
 
         self.cell_size = WIDTH // self.cols
 
-        # self.map = self.env.generate_map()
-        # self.env.load_agent(abilities=[1, 3])
-        # self.env.load_agent(abilities=[1, 4])
-        # self.env.place_agents_at_start()
+        self.map = self.env.generate_map()
+        self.env.load_agent(abilities=[1, 3])
+        self.env.load_agent(abilities=[1, 4])
+        self.env.place_agents_at_start()
         # self.env.load_agent(abilities=[1,2])
         # self.env.place_agents()
 
@@ -66,7 +66,7 @@ class Visualizer():
         # Draw ground truth map
         for row in range(self.rows):
             for col in range(self.cols):
-                cell_type = map[row][col]
+                cell_type = map[row][col].get_type()
                 cell_color = self.color_map.get(cell_type, WHITE)  # Default to WHITE if not found
                 pygame.draw.rect(screen, cell_color, (col * self.cell_size, row * self.cell_size, self.cell_size, self.cell_size))
 
@@ -80,7 +80,7 @@ class Visualizer():
         # Draw observation map
         for row in range(self.rows):
             for col in range(self.cols):
-                cell_obs_type = obs_map[row][col]
+                cell_obs_type = obs_map[row][col].get_type()
                 cell_obs_color = self.color_map.get(cell_obs_type, GRAY)
                 pygame.draw.rect(screen, cell_obs_color, (WIDTH + (col * self.cell_size), row * self.cell_size, self.cell_size, self.cell_size))
 
@@ -95,7 +95,7 @@ class Visualizer():
         # Draw ground truth map
         for row in range(self.rows):
             for col in range(self.cols):
-                cell_type = map[row][col]
+                cell_type = map[row][col].get_type()
                 cell_color = self.color_map.get(cell_type, WHITE)  # Default to WHITE if not found
                 pygame.draw.rect(screen, cell_color, (col * self.cell_size, row * self.cell_size, self.cell_size, self.cell_size))
 
@@ -103,7 +103,7 @@ class Visualizer():
         # Draw observation map
         for row in range(self.rows):
             for col in range(self.cols):
-                cell_obs_type = obs_map[row][col]
+                cell_obs_type = obs_map[row][col].get_type()
                 cell_obs_color = self.color_map.get(cell_obs_type, GRAY)
                 pygame.draw.rect(screen, cell_obs_color, (WIDTH + (col * self.cell_size), row * self.cell_size, self.cell_size, self.cell_size))
 
@@ -161,7 +161,7 @@ class Visualizer():
         print("obs: {}".format(obs))
         if len(obs) == 0:
             return False
-        return (obs[0].get_type() != CellType.WALL and obs[0].get_type() != CellType.OOB)
+        return (obs[0]["type"] != CellType.WALL and obs[0]["type"] != CellType.OOB)
     
 
     def choose_new_direction(self, current_direction):
@@ -243,7 +243,7 @@ class Visualizer():
 
 if __name__ == "__main__":
     vis = Visualizer()
-    # vis.main()
+    vis.main()
 
-    vis.test_main()
+    # vis.test_main()
             

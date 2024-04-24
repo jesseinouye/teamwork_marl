@@ -371,6 +371,7 @@ class EnvEngine(EnvBase):
                 if self.map[row, col].get_type() == CellType.FLOOR:
                     self.agents[cur_agent].position = (row, col)
                     self.state_map[row, col] = self.get_agent_cell_from_id(self.agents[cur_agent])
+                    self.state_map[row, col].observe()
                     cur_agent += 1
                     if cur_agent >= len(self.agents):
                         return
@@ -394,6 +395,7 @@ class EnvEngine(EnvBase):
 
         # ensure 'move' is not None before proceeding
         if move is not None:
+            print(agent.position, move)
             n_row, n_col = agent.position[0] + move[0], agent.position[1] + move[1]
 
             # Correctly call and use the result of check_agent_ability
@@ -401,6 +403,7 @@ class EnvEngine(EnvBase):
                 self.state_map[agent.position] = self.map[agent.position]
                 agent.position = (n_row, n_col)
                 self.state_map[agent.position] = self.get_agent_cell_from_id(agent)
+                # self.state_map[agent.position].observe()
         # else:
             # print(f"Invalid direction {dir}")
 
@@ -549,6 +552,8 @@ class EnvEngine(EnvBase):
                 # Check if position is in bounds, otherwise mark OOB
                 if 0 <= n_row < self.cols and 0 <= n_col < self.rows:
                     if self.obs_map[n_row, n_col].get_type() == CellType.UNKNOWN:
+                         # mark it as observed
+                        self.map[n_row, n_col].observe()
                         self.obs_map[n_row, n_col] = self.map[n_row, n_col]
                         self.cur_step_reward += 1
                 else:
@@ -561,6 +566,8 @@ class EnvEngine(EnvBase):
 
                     if 0 <= n_row < self.cols and 0 <= n_col < self.rows:
                         if self.obs_map[n_row, n_col].get_type() == CellType.UNKNOWN:
+                             # mark it as observed
+                            self.map[n_row, n_col].observe()
                             self.obs_map[n_row, n_col] = self.map[n_row, n_col]
                             self.cur_step_reward += 1
                     else:
@@ -573,6 +580,9 @@ class EnvEngine(EnvBase):
 
                     if 0 <= n_row < self.cols and 0 <= n_col < self.rows:
                         if self.obs_map[n_row, n_col].get_type() == CellType.UNKNOWN:
+                            # mark it as observed
+                            self.map[n_row, n_col].observe()
+
                             self.obs_map[n_row, n_col] = self.map[n_row, n_col]
                             self.cur_step_reward += 1
                     else:
@@ -585,7 +595,10 @@ class EnvEngine(EnvBase):
 
                         if 0 <= n_row < self.cols and 0 <= n_col < self.rows:
                             if self.obs_map[n_row, n_col].get_type() == CellType.UNKNOWN:
+                                # mark it as observed
+                                self.map[n_row, n_col].observe()
                                 self.obs_map[n_row, n_col] = self.map[n_row, n_col]
+
                                 self.cur_step_reward += 1
                         else:
                             # OOB case
