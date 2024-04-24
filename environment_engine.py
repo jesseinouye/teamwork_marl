@@ -47,7 +47,7 @@ class Agent():
 class EnvEngine(EnvBase):
 
     
-    def __init__(self, n_agents=2, device="cpu", map_size=25, agent_abilities=[[1], [1]]) -> None:
+    def __init__(self, n_agents=2, device="cpu", map_size=25, agent_abilities=[[1], [1]], seed=None) -> None:
         self.map_data = []
 
         # initialize discovered tiles
@@ -88,6 +88,8 @@ class EnvEngine(EnvBase):
 
         self.cur_step_reward = 0
 
+        self.cur_step = 0
+
         # Make spec for action and observation
         self._make_spec()
 
@@ -104,7 +106,7 @@ class EnvEngine(EnvBase):
         self.done_spec = DiscreteTensorSpec(
             n=2,
             shape=torch.Size((1,)),
-            dtype=torch.bool,
+            dtype=torch.int8,
             device=self.device
         )
 
@@ -130,16 +132,16 @@ class EnvEngine(EnvBase):
             n=len(CellType),
             # shape=torch.Size((self.n_agents, self.obs_size)),
             shape=torch.Size((self.n_agents, self.rows, self.cols)),
-            dtype=torch.int,
+            dtype=torch.float32,
             device=self.device
         )
         info_spec = CompositeSpec(
             {
                 "episode_limit": DiscreteTensorSpec(
-                    2, dtype=torch.bool, device=self.device
+                    2, dtype=torch.int8, device=self.device
                 ),
                 "map_explored": DiscreteTensorSpec(
-                    2, dtype=torch.bool, device=self.device
+                    2, dtype=torch.int8, device=self.device
                 )
             }
         )
@@ -147,7 +149,7 @@ class EnvEngine(EnvBase):
             2,
             torch.Size((self.n_agents, self.n_actions)),
             device=self.device,
-            dtype=torch.bool
+            dtype=torch.int8
         )
         spec = CompositeSpec(
             {
@@ -159,7 +161,7 @@ class EnvEngine(EnvBase):
                     n=len(CellType),
                     # shape=torch.Size((self.n_agents, self.obs_size)),
                     shape=torch.Size((self.rows, self.cols)),
-                    dtype=torch.int,
+                    dtype=torch.float32,
                     device=self.device
                 ),
                 "info": info_spec
@@ -200,9 +202,12 @@ class EnvEngine(EnvBase):
             all_agent_obs.append(agent_obs)
 
         all_agent_obs = np.array(all_agent_obs)
-        obs = torch.tensor(all_agent_obs)
+        obs = torch.tensor(all_agent_obs, dtype=torch.float32)
+        
+        # Adding 'channels' dimension
+        obs = torch.unsqueeze(obs, 1)
 
-        state = torch.tensor(self.map_to_numeric(self.state_map))
+        state = torch.tensor(self.map_to_numeric(self.state_map), dtype=torch.float32)
 
         reward = torch.tensor([self.cur_step_reward], device=self.device, dtype=torch.float32)
 
@@ -224,7 +229,7 @@ class EnvEngine(EnvBase):
 
         info = TensorDict(
             source={
-                "episode_limit": torch.tensor([0]),
+                "episode_limit": torch.tensor([100]),
                 "map_explored": torch.tensor([0])
             },
             batch_size=(),
@@ -244,11 +249,16 @@ class EnvEngine(EnvBase):
             device=self.device
         )
         
+        self.cur_step += 1
+        # print("executed step: {} - actions were: {}".format(self.cur_step, acts))
+
         return out
 
     def _reset(self, tensordict:TensorDictBase):
         # Clear observed map
         # Move all agents to start (upper left corner)
+
+        self.cur_step = 0
 
         # Clear observed and state maps
         self.clear_obs_map()
@@ -269,9 +279,11 @@ class EnvEngine(EnvBase):
         # Example: If agents' observations can be stacked or concatenated
         # For demonstration, let's assume we stack them along a new axis
         obs_array = np.stack(all_agent_obs, axis=0)
-        obs = torch.tensor(obs_array, dtype=torch.int32)
-        state = torch.tensor(self.numeric_state_map, dtype=torch.int32)
+        obs = torch.tensor(obs_array, dtype=torch.float32)
+        state = torch.tensor(self.numeric_state_map, dtype=torch.float32)
 
+        # Adding 'channels' dimension
+        obs = torch.unsqueeze(obs, 1)
 
         # obs = torch.tensor(all_agent_obs)
         # state = torch.tensor(self.state_map)
@@ -293,14 +305,14 @@ class EnvEngine(EnvBase):
 
         info = TensorDict(
             source={
-                "episode_limit": torch.tensor([0]),
+                "episode_limit": torch.tensor([100]),
                 "map_explored": torch.tensor([0])
             },
             batch_size=(),
             device=self.device
         )
 
-        reward = torch.tensor([1])
+        reward = torch.tensor([0])
         done = torch.tensor([0])
 
         out = TensorDict(
@@ -308,9 +320,9 @@ class EnvEngine(EnvBase):
                 "agents": agents_td,
                 "state": state,
                 "info": info,
-                "reward": reward,
-                "done": done,
-                "terminated": done.clone()
+                # "reward": reward,
+                # "done": done,
+                # "terminated": done.clone()
             },
             batch_size=(),
             device=self.device
@@ -355,7 +367,7 @@ class EnvEngine(EnvBase):
 
         for row in range(self.rows):
             for col in range(self.cols):
-                print("row: {}, col: {}".format(row, col), self.map[row, col])
+                # print("row: {}, col: {}".format(row, col), self.map[row, col])
                 if self.map[row, col].get_type() == CellType.FLOOR:
                     self.agents[cur_agent].position = (row, col)
                     self.state_map[row, col] = self.get_agent_cell_from_id(self.agents[cur_agent])
@@ -389,8 +401,9 @@ class EnvEngine(EnvBase):
                 self.state_map[agent.position] = self.map[agent.position]
                 agent.position = (n_row, n_col)
                 self.state_map[agent.position] = self.get_agent_cell_from_id(agent)
-        else:
-            print(f"Invalid direction {dir}")
+        # else:
+            # print(f"Invalid direction {dir}")
+
 
     # Move agent in specified direction, if valid
     def check_agent_ability(self, agent:Agent, dir, n_row, n_col):
@@ -419,7 +432,7 @@ class EnvEngine(EnvBase):
         # Move agent to new position if not already occupied
         for check_agent in self.agents:
             if check_agent.position == (n_row, n_col):
-                print("Position {} already occupied by agent {}".format((check_agent.position, check_agent.id)))
+                # print("Position {} already occupied by agent {}".format(check_agent.position, check_agent.id))
                 return False
                 
         return True
@@ -530,7 +543,7 @@ class EnvEngine(EnvBase):
                     continue
                 
                 # Calc +row, +col
-                print("Agent position: {}".format(agent.position) , "d_row: {}, d_col: {}".format(d_row, d_col))
+                # print("Agent position: {}".format(agent.position) , "d_row: {}, d_col: {}".format(d_row, d_col))
                 n_row, n_col = agent.position[0] + d_row, agent.position[1] + d_col
 
                 # Check if position is in bounds, otherwise mark OOB
@@ -715,7 +728,7 @@ class EnvEngine(EnvBase):
 
     def connect_regions(self, region1, region2):
         if not region1 or not region2:
-            print("One or both regions have no edge cells to connect.")
+            # print("One or both regions have no edge cells to connect.")
             return  # Exit if there's nothing to connect
         start = region1[0]
         end = region2[0]

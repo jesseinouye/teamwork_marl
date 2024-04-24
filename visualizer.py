@@ -215,6 +215,7 @@ class Visualizer():
             # Perform step in env
             self.env.step(actions)
 
+            # print("actions:\n{}".format(actions))
             print("reward: {}".format(actions["next", "reward"][0]))
 
             # Get observation (map) from output of step
