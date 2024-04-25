@@ -112,17 +112,18 @@ def train():
     seed = 0
 
     # Params from config?
+    episodes = 10        # TODO: is this naming correct?
     batch_size = 20
     frames_per_batch = 100
-    total_frames = frames_per_batch * batch_size
+    total_frames = frames_per_batch * episodes
     memory_size = 10000
     gamma = 0.9
     tau = 0.005
     # lr = 5e-5
     lr = 1e-3
     max_grad_norm = 40
-    n_epochs = 3
-    max_steps = 50     # Steps run during eval
+    n_epochs = 5
+    max_steps = 100     # Steps run during eval
 
 
     # Device
@@ -251,6 +252,7 @@ def train():
         data_view = tensordict_data.reshape(-1)
         replay_buffer.extend(data_view)
 
+        print("current_frames: {}".format(current_frames))
 
 
         training_tds = []
@@ -292,17 +294,21 @@ def train():
         print("training_time: {}".format(training_time))
 
         iteration_time = sampling_time + training_time
-        total_time += iteration_time
         
         training_tds = torch.stack(training_tds)
+
+        # print("module: {}".format(cnn_module._modules["module"]._modules["agent_networks"][0][0].weight))
+        # print("module: {}".format(mlp_module._modules["module"]._modules["agent_networks"]))
+
 
         print("Evaluating")
         evaluation_start = time.time()
         with torch.no_grad(), set_exploration_type(ExplorationType.MODE):
+        # with torch.no_grad():
             env_test.frames = []
             rollouts = env_test.rollout(
                 max_steps=max_steps,
-                policy=qnet,
+                policy=qnet_explore,
                 auto_cast_to_device=True,
                 break_when_any_done=False
             )
@@ -311,7 +317,6 @@ def train():
 
             print("eval_time: {}".format(evaluation_time))
 
-            total_time += evaluation_time
 
 
         # print("rollout:\n{}".format(rollouts))
@@ -330,13 +335,13 @@ def train():
         vis.visualize_action_set(env_test, rollouts["agents", "action"])
 
 
-    print("loss:\n{}".format(training_tds["loss"]))
-    print("grad_norm:\n{}".format(training_tds["grad_norm"]))
+    # print("loss:\n{}".format(training_tds["loss"]))
+    # print("grad_norm:\n{}".format(training_tds["grad_norm"]))
 
 
-    plt.plot(training_tds["loss"].cpu().detach().numpy())
-    plt.savefig('loss.png')
-    plt.show()
+    # plt.plot(training_tds["loss"].cpu().detach().numpy())
+    # plt.savefig('loss.png')
+    # plt.show()
 
 
 

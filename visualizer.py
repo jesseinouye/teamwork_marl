@@ -50,9 +50,8 @@ class Visualizer():
 
         pygame.init()
 
-    def init_env(self):
-        self.env = EnvEngine(n_agents=2, agent_abilities=[[1, 3], [1, 4]])
-        # self.env = EnvEngine(n_agents=4, agent_abilities=[[1, 3], [1, 4], [1], [1]])
+    def init_env(self, seed=None):
+        self.env = EnvEngine(n_agents=2, agent_abilities=[[1, 3], [1, 4]], seed=seed)
         
         # Params
         self.rows = self.env.rows
@@ -112,6 +111,23 @@ class Visualizer():
                 pygame.draw.rect(screen, cell_obs_color, (WIDTH + (col * self.cell_size), row * self.cell_size, self.cell_size, self.cell_size))
 
                     
+    def draw_map_vis(self, screen, map):
+        # Draw ground truth map
+        for row in range(self.rows):
+            for col in range(self.cols):
+                cell_type = map[row][col]
+                cell_color = self.color_map.get(cell_type, WHITE)  # Default to WHITE if not found
+                pygame.draw.rect(screen, cell_color, (col * self.cell_size, row * self.cell_size, self.cell_size, self.cell_size))
+
+    def draw_observation_map_vis(self, screen, obs_map):
+        # Draw observation map
+        for row in range(self.rows):
+            for col in range(self.cols):
+                cell_obs_type = obs_map[row][col]
+                cell_obs_color = self.color_map.get(cell_obs_type, GRAY)
+                pygame.draw.rect(screen, cell_obs_color, (WIDTH + (col * self.cell_size), row * self.cell_size, self.cell_size, self.cell_size))
+
+
 
     def main(self):
         screen = pygame.display.set_mode((FULL_WIDTH, HEIGHT))
@@ -184,7 +200,7 @@ class Visualizer():
         pygame.display.set_caption("SLAM Visualizer")
         screen.fill(WHITE)
 
-        self.init_env()
+        self.init_env(seed=0)
 
         running = True
 
@@ -228,15 +244,15 @@ class Visualizer():
 
             # Get observation (map) from output of step
             obs_map = actions["next", "agents", "observation"]
-            obs_map = obs_map[0].numpy()
+            obs_map = obs_map[0,0].numpy()
 
             # Get ground truth state (map) from output of step
             map = actions["next", "state"]
             map = map.numpy()
 
             # Draw ground truth and observation maps
-            self.draw_map_no_agents(screen, map)
-            self.draw_observation_map_no_agents(screen, obs_map)
+            self.draw_map_vis(screen, map)
+            self.draw_observation_map_vis(screen, obs_map)
             
             # Update pygame display
             # Adding a small delay can make the agent's movement easier to observe
@@ -286,8 +302,8 @@ class Visualizer():
             map = map.numpy()
 
             # Draw ground truth and observation maps
-            self.draw_map_no_agents(self.screen, map)
-            self.draw_observation_map_no_agents(self.screen, obs_map)
+            self.draw_map_vis(self.screen, map)
+            self.draw_observation_map_vis(self.screen, obs_map)
             
             # Update pygame display
             # Adding a small delay can make the agent's movement easier to observe
@@ -299,7 +315,7 @@ class Visualizer():
 
 if __name__ == "__main__":
     vis = Visualizer()
-    vis.main()
+    # vis.main()
 
-    # vis.test_main()
+    vis.test_main()
             
