@@ -29,20 +29,10 @@ class Visualizer():
     def __init__(self) -> None:
         self.device = "cpu"
 
-        self.env = EnvEngine(n_agents=2, agent_abilities=[[1, 3], [1, 4]])
-        # self.env = EnvEngine(n_agents=4, agent_abilities=[[1, 3], [1, 4], [1], [1]])
-        
-
-        # Params
-        self.rows = self.env.rows
-        self.cols = self.env.cols
-
-        self.cell_size = WIDTH // self.cols
-
-        self.map = self.env.generate_map()
-        self.env.load_agent(abilities=[1, 3])
-        self.env.load_agent(abilities=[1, 4])
-        self.env.place_agents_at_start()
+        # self.map = self.env.generate_map()
+        # self.env.load_agent(abilities=[1, 3])
+        # self.env.load_agent(abilities=[1, 4])
+        # self.env.place_agents_at_start()
         # self.env.load_agent(abilities=[1,2])
         # self.env.place_agents()
 
@@ -60,6 +50,20 @@ class Visualizer():
 
         pygame.init()
 
+    def init_env(self):
+        self.env = EnvEngine(n_agents=2, agent_abilities=[[1, 3], [1, 4]])
+        # self.env = EnvEngine(n_agents=4, agent_abilities=[[1, 3], [1, 4], [1], [1]])
+        
+        # Params
+        self.rows = self.env.rows
+        self.cols = self.env.cols
+
+        self.cell_size = WIDTH // self.cols
+
+    def init_game_vis(self):
+        self.screen = pygame.display.set_mode((FULL_WIDTH, HEIGHT))
+        pygame.display.set_caption("SLAM Visualizer")
+        self.screen.fill(WHITE)
 
 
     def draw_map(self, screen, map, agents:list[Agent]=[]):
@@ -113,6 +117,8 @@ class Visualizer():
         screen = pygame.display.set_mode((FULL_WIDTH, HEIGHT))
         pygame.display.set_caption("SLAM Visualizer")
         screen.fill(WHITE)
+
+        self.init_env()
 
         running = True
 
@@ -178,6 +184,8 @@ class Visualizer():
         pygame.display.set_caption("SLAM Visualizer")
         screen.fill(WHITE)
 
+        self.init_env()
+
         running = True
 
         # Reset env to start
@@ -238,6 +246,54 @@ class Visualizer():
 
 
         # self.env.reset(None)
+
+    def visualize_action_set(self, env:EnvEngine, actions:torch.Tensor):
+        self.init_game_vis()
+
+        self.rows = env.rows
+        self.cols = env.cols
+
+        self.cell_size = WIDTH // self.cols
+
+        env.reset()
+
+        for action in actions:
+            # action = torch.unsqueeze(action, 0)
+
+            print("action: {}".format(action))
+
+            action = TensorDict(
+                {"agents": TensorDict(
+                    {"action": action},
+                    batch_size=(),
+                    device=self.device)
+                },
+                batch_size=(),
+                device=self.device
+            )
+
+            env.step(action)
+
+            # print("actions:\n{}".format(actions))
+            # print("reward: {}".format(action["next", "reward"][0]))
+
+            # Get observation (map) from output of step
+            obs_map = action["next", "agents", "observation"]
+            obs_map = obs_map[0,0].numpy()
+
+            # Get ground truth state (map) from output of step
+            map = action["next", "state"]
+            map = map.numpy()
+
+            # Draw ground truth and observation maps
+            self.draw_map_no_agents(self.screen, map)
+            self.draw_observation_map_no_agents(self.screen, obs_map)
+            
+            # Update pygame display
+            # Adding a small delay can make the agent's movement easier to observe
+            pygame.display.update()
+            pygame.time.delay(200)
+
 
 
 

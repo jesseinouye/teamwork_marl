@@ -92,6 +92,7 @@ class EnvEngine(EnvBase):
 
         # Make spec for action and observation
         self._make_spec()
+        self._set_seed(seed)
 
 
     def _make_spec(self):
@@ -172,6 +173,7 @@ class EnvEngine(EnvBase):
     def _set_seed(self, seed: Optional[int]):
         rng = torch.manual_seed(seed)
         self.rng = rng
+        random.seed(seed)
         # TODO: set seed for map generation too?
 
 
@@ -210,6 +212,8 @@ class EnvEngine(EnvBase):
         state = torch.tensor(self.map_to_numeric(self.state_map), dtype=torch.float32)
 
         reward = torch.tensor([self.cur_step_reward], device=self.device, dtype=torch.float32)
+
+        # print("step -- actions: {} -- reward: {}".format(acts, reward))
 
         # TODO: Calculate if done
         done = torch.tensor([0])
@@ -257,6 +261,7 @@ class EnvEngine(EnvBase):
     def _reset(self, tensordict:TensorDictBase):
         # Clear observed map
         # Move all agents to start (upper left corner)
+        # print("resetting!!")
 
         self.cur_step = 0
 

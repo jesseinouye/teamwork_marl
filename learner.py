@@ -4,6 +4,7 @@ import torch
 import matplotlib.pyplot as plt
 
 from environment_engine import EnvEngine, Action, Agent, CellType
+from visualizer import Visualizer
 
 from tensordict.nn import TensorDictModule, TensorDictSequential
 from torch import nn
@@ -111,16 +112,17 @@ def train():
     seed = 0
 
     # Params from config?
-    batch_size = 1
-    frames_per_batch = 50
+    batch_size = 20
+    frames_per_batch = 100
     total_frames = frames_per_batch * batch_size
     memory_size = 10000
     gamma = 0.9
     tau = 0.005
-    lr = 5e-5
+    # lr = 5e-5
+    lr = 1e-3
     max_grad_norm = 40
-    n_epochs = 5
-    max_steps = 50
+    n_epochs = 3
+    max_steps = 50     # Steps run during eval
 
 
     # Device
@@ -138,7 +140,7 @@ def train():
         centralised=False,
         share_params=False,
         in_features=1,
-        kernel_sizes=3,
+        kernel_sizes=[5, 3, 3],
         num_cells=[16, 32, 32],
         strides=[2, 2, 1],
         paddings=[1, 1, 1],
@@ -176,11 +178,12 @@ def train():
     
     qnet = SafeSequential(cnn_module, mlp_module, value_module)
 
+    print("Building: qnet_explore")
     qnet_explore = TensorDictSequential(
         qnet,
         EGreedyModule(
-            eps_init=0.3,
-            eps_end=0,
+            eps_init=0.5,
+            eps_end=0.1,
             annealing_num_steps=1000,
             action_key=("agents", "action"),
             spec=env.action_spec
@@ -198,6 +201,7 @@ def train():
         out_keys=["chosen_action_value"]
     )
 
+    print("Building: collector")
     collector = SyncDataCollector(
         env,
         qnet_explore,
@@ -227,16 +231,18 @@ def train():
     optim = torch.optim.Adam(loss_module.parameters(), lr=lr)
 
 
-    total_time = 0
     total_frames = 0
     sampling_start = time.time()
+    start_time = time.time()
 
+    print("Enumerating collector")
     for i, tensordict_data in enumerate(collector):
-        print(f"Iteration: {i}")
+        print(f"ITERATION: {i}")
 
         sampling_time = time.time() - sampling_start
+        print("sampling_time: {}".format(sampling_time))
 
-        # TODO: is this right?
+        # TODO: fix this? I think episode_reward should be total accumulated reward from entire episode
         # Set episode_reward to be the same as reward
         tensordict_data.set(("next", "episode_reward"), tensordict_data.get(("next", "reward")))
 
@@ -249,18 +255,22 @@ def train():
 
         training_tds = []
         training_start = time.time()
-        for _ in range(n_epochs):
-            for _ in range(frames_per_batch // batch_size):
+        for j in range(n_epochs):
+            # print("EPOCH: {}".format(j))
+            for k in range(frames_per_batch // batch_size):
+                # print("BATCH: {}".format(k))
                 subdata = replay_buffer.sample()
 
                 # print("subdata: {}".format(subdata))
 
                 loss_vals = loss_module(subdata)
-                training_tds.append(loss_vals.detach())
+                # training_tds.append(loss_vals.detach())
 
                 loss_value = loss_vals["loss"]
 
                 loss_value.backward()
+
+                training_tds.append(loss_vals.detach())
 
                 total_norm = torch.nn.utils.clip_grad_norm(
                     loss_module.parameters(), max_grad_norm
@@ -270,6 +280,9 @@ def train():
                 optim.step()
                 optim.zero_grad()
                 target_net_updater.step()
+
+                # Printing module weights to test that they're changing
+                # print("module: {}".format(cnn_module._modules["module"]._modules["agent_networks"][0][0].weight))
 
         qnet_explore[1].step(frames=current_frames)
         collector.update_policy_weights_()
@@ -283,6 +296,7 @@ def train():
         
         training_tds = torch.stack(training_tds)
 
+        print("Evaluating")
         evaluation_start = time.time()
         with torch.no_grad(), set_exploration_type(ExplorationType.MODE):
             env_test.frames = []
@@ -300,12 +314,28 @@ def train():
             total_time += evaluation_time
 
 
-    print("total_time: {}".format(total_time))
+        # print("rollout:\n{}".format(rollouts))
+
+        # TODO: is it right to reset here? Otherwise the collector doesn't reset the env before it collects more samples?
+        env.reset()
+        sampling_start = time.time()
+
+    print("total_time: {}".format(time.time() - start_time))
+
+    # Visualizer
+    if 1:
+        vis = Visualizer()
+        vis.init_game_vis()
+        env_test.reset()
+        vis.visualize_action_set(env_test, rollouts["agents", "action"])
+
 
     print("loss:\n{}".format(training_tds["loss"]))
     print("grad_norm:\n{}".format(training_tds["grad_norm"]))
 
+
     plt.plot(training_tds["loss"].cpu().detach().numpy())
+    plt.savefig('loss.png')
     plt.show()
 
 
