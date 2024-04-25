@@ -1,3 +1,4 @@
+import sys
 import random
 import copy
 import torch
@@ -20,6 +21,8 @@ from tile import CellType, Tile
 # Agent observations
 # class AgentObs(CellType):
 #     UNKNOWN = 6
+
+np.set_printoptions(threshold=sys.maxsize)
 
 
 # Actions agents can take
@@ -46,8 +49,10 @@ class Agent():
 # Environment engine
 class EnvEngine(EnvBase):
 
-    
-    def __init__(self, n_agents=2, device="cpu", map_size=25, agent_abilities=[[1], [1]], seed=None) -> None:
+    def __init__(self, n_agents=2, device="cpu", map_size=32, agent_abilities=[[1], [1]], seed=None) -> None:
+        if seed is not None:
+            self._set_seed(seed)
+
         self.map_data = []
 
         # initialize discovered tiles
@@ -92,7 +97,6 @@ class EnvEngine(EnvBase):
 
         # Make spec for action and observation
         self._make_spec()
-        self._set_seed(seed)
 
 
     def _make_spec(self):
@@ -171,6 +175,7 @@ class EnvEngine(EnvBase):
         return spec
 
     def _set_seed(self, seed: Optional[int]):
+        print("Using seed: {}".format(seed))
         rng = torch.manual_seed(seed)
         self.rng = rng
         random.seed(seed)
@@ -223,7 +228,9 @@ class EnvEngine(EnvBase):
         #       should match format of observation spec ?
 
         # obs = torch.zeros(self.n_agents, self.obs_size)
-        mask = actions
+
+        # TODO: remove action_mask from the spec (it's not needed - used to dynamically mask valid/invalid actions)
+        mask = torch.tensor([[1, 1, 1, 1, 1]] * self.n_agents)
 
         # state = torch.zeros(self.n_agents, self.obs_size)
 
@@ -299,7 +306,7 @@ class EnvEngine(EnvBase):
 
         # obs = torch.zeros(self.n_agents, self.obs_size)
         # tmp_mask = [[1, 0, 0, 0, 0]] * self.n_agents
-        mask = torch.tensor([[1, 0, 0, 0, 0]] * self.n_agents)
+        mask = torch.tensor([[1, 1, 1, 1, 1]] * self.n_agents)
         # mask = torch.tensor([[1, 0, 0, 0, 0], [1, 0, 0, 0, 0]])
 
         # state = torch.zeros(self.n_agents, self.obs_size)
@@ -332,6 +339,8 @@ class EnvEngine(EnvBase):
             batch_size=(),
             device=self.device
         )
+
+        # print("OBS: {}".format(obs_array))
 
         return out
 
@@ -400,7 +409,7 @@ class EnvEngine(EnvBase):
 
         # ensure 'move' is not None before proceeding
         if move is not None:
-            print(agent.position, move)
+            # print(agent.position, move)
             n_row, n_col = agent.position[0] + move[0], agent.position[1] + move[1]
 
             # Correctly call and use the result of check_agent_ability
@@ -587,7 +596,6 @@ class EnvEngine(EnvBase):
                         if self.obs_map[n_row, n_col].get_type() == CellType.UNKNOWN:
                             # mark it as observed
                             self.map[n_row, n_col].observe()
-
                             self.obs_map[n_row, n_col] = self.map[n_row, n_col]
                             self.cur_step_reward += 1
                     else:
@@ -603,7 +611,6 @@ class EnvEngine(EnvBase):
                                 # mark it as observed
                                 self.map[n_row, n_col].observe()
                                 self.obs_map[n_row, n_col] = self.map[n_row, n_col]
-
                                 self.cur_step_reward += 1
                         else:
                             # OOB case
