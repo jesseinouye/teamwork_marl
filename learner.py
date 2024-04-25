@@ -106,21 +106,21 @@ def test_func():
 def train():
     n_agents = 2
 
-    hidden_dim = 2048   # TODO: change this to match flattened output from cnn
+    hidden_dim = 4096   # TODO: change this to match flattened output from cnn
     action_space = 5    # TODO: change this so it pulls from env.action_spec.space.n ?
 
     seed = 0
 
     # Params from config?
-    episodes = 10        # TODO: is this naming correct?
-    batch_size = 20
-    frames_per_batch = 100
+    episodes = 50        # TODO: is this naming correct?
+    batch_size = 50
+    frames_per_batch = 1000
     total_frames = frames_per_batch * episodes
     memory_size = 10000
     gamma = 0.9
     tau = 0.005
-    # lr = 5e-5
-    lr = 1e-3
+    lr = 5e-6
+    # lr = 1e-3
     max_grad_norm = 40
     n_epochs = 5
     max_steps = 100     # Steps run during eval
@@ -128,6 +128,7 @@ def train():
 
     # Device
     device = "cpu" if not torch.cuda.device_count() else "cuda:0"
+    print("Using device: {}".format(device))
 
     torch.manual_seed(seed)
 
@@ -142,7 +143,7 @@ def train():
         share_params=False,
         in_features=1,
         kernel_sizes=[5, 3, 3],
-        num_cells=[16, 32, 32],
+        num_cells=[32, 64, 64],
         strides=[2, 2, 1],
         paddings=[1, 1, 1],
         activation_class=torch.nn.ReLU,
@@ -198,7 +199,7 @@ def train():
             n_agents=n_agents,
             device=device
         ),
-        in_keys=[("agents", "chosen_action_value"), ("state")],
+        in_keys=[("agents", "chosen_action_value"), "state"],
         out_keys=["chosen_action_value"]
     )
 
@@ -223,7 +224,8 @@ def train():
         action_value=("agents", "action_value"),
         local_value=("agents", "chosen_action_value"),
         global_value="chosen_action_value",
-        action=env.action_key
+        # action=env.action_key
+        action=("agents", "action")
     )
     loss_module.make_value_estimator(ValueEstimators.TD0, gamma=gamma)
     
@@ -241,18 +243,18 @@ def train():
         print(f"ITERATION: {i}")
 
         sampling_time = time.time() - sampling_start
-        print("sampling_time: {}".format(sampling_time))
+        print("  sampling_time: {}".format(sampling_time))
 
         # TODO: fix this? I think episode_reward should be total accumulated reward from entire episode
         # Set episode_reward to be the same as reward
-        tensordict_data.set(("next", "episode_reward"), tensordict_data.get(("next", "reward")))
+        # tensordict_data.set(("next", "episode_reward"), tensordict_data.get(("next", "reward")))
 
         current_frames = tensordict_data.numel()
         total_frames += current_frames
         data_view = tensordict_data.reshape(-1)
         replay_buffer.extend(data_view)
 
-        print("current_frames: {}".format(current_frames))
+        # print("current_frames: {}".format(current_frames))
 
 
         training_tds = []
@@ -291,7 +293,7 @@ def train():
 
         training_time = time.time() - training_start
 
-        print("training_time: {}".format(training_time))
+        print("  training_time: {}".format(training_time))
 
         iteration_time = sampling_time + training_time
         
@@ -301,7 +303,7 @@ def train():
         # print("module: {}".format(mlp_module._modules["module"]._modules["agent_networks"]))
 
 
-        print("Evaluating")
+        # print("Evaluating")
         evaluation_start = time.time()
         with torch.no_grad(), set_exploration_type(ExplorationType.MODE):
         # with torch.no_grad():
@@ -315,7 +317,7 @@ def train():
 
             evaluation_time = time.time() - evaluation_start
 
-            print("eval_time: {}".format(evaluation_time))
+            print("  eval_time: {}".format(evaluation_time))
 
 
 
