@@ -49,7 +49,7 @@ class Agent():
 # Environment engine
 class EnvEngine(EnvBase):
 
-    def __init__(self, n_agents=2, device="cpu", map_size=32, agent_abilities=[[1], [1]], seed=None) -> None:
+    def __init__(self, n_agents=2, device="cpu", map_size=32, agent_abilities=[[1], [1]], seed=None, fname=None) -> None:
         if seed is not None:
             self._set_seed(seed)
 
@@ -66,8 +66,12 @@ class EnvEngine(EnvBase):
 
         self.agent_obs_dist = 3
 
-        # Generate map
-        self.map = self.generate_map()
+        if fname is None:
+            # If no filename give, generate map
+            self.map = self.generate_map()
+        else:
+            # If filename given, load map from file
+            self.map = self.load_map(fname)
 
         # Create state map (contains agent locations)
         self.state_map = copy.deepcopy(self.map)
@@ -555,8 +559,8 @@ class EnvEngine(EnvBase):
             for d_col in range(agent.rangeOfSight+1):
                 if d_row == 0 and d_col == 0:
                     # Agent's new position, observation already seen
-                    # n_row, n_col = agent.position[0] + d_row, agent.position[1] + d_col
-                    # self.obs_map[n_row, n_col] = self.map[n_row, n_col]
+                    n_row, n_col = agent.position[0] + d_row, agent.position[1] + d_col
+                    self.obs_map[n_row, n_col] = self.map[n_row, n_col]
                     continue
                 
                 # Calc +row, +col
@@ -782,6 +786,26 @@ class EnvEngine(EnvBase):
                 err += dx
                 y0 += sy
 
+    # Save map to .csv file
+    def save_map(self, fname):
+        tmp_map = self.map_to_numeric(self.map)
+        # print(map)
+
+        tmp_map = np.array(tmp_map, dtype=np.int8)
+        np.savetxt(fname, tmp_map, delimiter=',', fmt='%d')
+
+    # Load map from .csv file
+    def load_map(self, fname):
+        tmp_map = np.genfromtxt(fname, delimiter=',')
+        tile_map = [[Tile(CellType(tmp_map[row, col])) for col in range(tmp_map.shape[1])] for row in range(tmp_map.shape[0])]
+
+        # for row in tmp_map:
+        #     for tile in row:
+        #         tmp_map = Tile(CellType(tile))
+
+
+        self.map = np.array(tile_map)
+        return self.map
 
     # Get base map data
     def get_map(self):

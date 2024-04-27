@@ -16,7 +16,7 @@ from torchrl.data.replay_buffers.storages import LazyTensorStorage
 from torchrl.envs import RewardSum, TransformedEnv
 from torchrl.envs.libs.vmas import VmasEnv
 from torchrl.envs.utils import ExplorationType, set_exploration_type
-from torchrl.modules import EGreedyModule, QValueModule, SafeSequential
+from torchrl.modules import EGreedyModule, QValueModule, SafeSequential, DistributionalDQNnet
 from torchrl.modules.models.multiagent import MultiAgentMLP, QMixer, VDNMixer, MultiAgentConvNet
 from torchrl.objectives import SoftUpdate, ValueEstimators
 from torchrl.objectives.multiagent.qmixer import QMixerLoss
@@ -112,18 +112,18 @@ def train():
     seed = 0
 
     # Params from config?
-    episodes = 50        # TODO: is this naming correct?
-    batch_size = 50
-    frames_per_batch = 1000
+    episodes = 1        # TODO: is this naming correct?
+    batch_size = 1      # TODO: big powers of 2
+    frames_per_batch = 1
     total_frames = frames_per_batch * episodes
-    memory_size = 10000
-    gamma = 0.9
+    memory_size = 10000         # TODO: increase this
+    gamma = 0.95
     tau = 0.005
     lr = 5e-6
     # lr = 1e-3
     max_grad_norm = 40
-    n_epochs = 5
-    max_steps = 100     # Steps run during eval
+    n_epochs = 1
+    max_steps = 1     # Steps run during eval
 
 
     # Device
@@ -159,12 +159,15 @@ def train():
         centralised=False,
         share_params=False,
         depth=2,
-        num_cells=4096,
+        num_cells=4096,     # TODO: reduce this
         activation_class=nn.ReLU,
         device=device
     )
 
     mlp_module = TensorDictModule(mlp, in_keys=[("agents", "hidden")], out_keys=[("agents", "action_value")])
+
+    # DistributionalDQNnet applies log softmax
+    softmax = DistributionalDQNnet(in_keys=[("agents", "action_value")], out_keys=[("agents", "action_value")])
 
     value_module = QValueModule(
         action_value_key=("agents", "action_value"),
@@ -175,10 +178,11 @@ def train():
         ],
         spec=env.action_spec,
         action_space="one-hot"
-
     )
+
     
-    qnet = SafeSequential(cnn_module, mlp_module, value_module)
+    # qnet = SafeSequential(cnn_module, mlp_module, value_module)
+    qnet = SafeSequential(cnn_module, mlp_module, softmax, value_module)
 
     print("Building: qnet_explore")
     qnet_explore = TensorDictSequential(

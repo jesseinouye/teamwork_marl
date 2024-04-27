@@ -50,8 +50,8 @@ class Visualizer():
 
         pygame.init()
 
-    def init_env(self, seed=None):
-        self.env = EnvEngine(n_agents=2, agent_abilities=[[1, 3], [1, 4]], seed=seed)
+    def init_env(self, seed=None, fname=None):
+        self.env = EnvEngine(n_agents=2, agent_abilities=[[1, 3], [1, 4]], seed=seed, fname=fname)
         
         # Params
         self.rows = self.env.rows
@@ -200,7 +200,8 @@ class Visualizer():
         pygame.display.set_caption("SLAM Visualizer")
         screen.fill(WHITE)
 
-        self.init_env(seed=0)
+        # self.init_env(seed=0, fname="simple_map.csv")
+        self.init_env(seed=0, fname="simple_map.csv")
 
         running = True
 
@@ -311,6 +312,18 @@ class Visualizer():
             pygame.time.delay(200)
 
 
+    def map_test(self):
+        screen = pygame.display.set_mode((FULL_WIDTH, HEIGHT))
+        pygame.display.set_caption("SLAM Visualizer")
+        screen.fill(WHITE)
+
+        self.init_env(seed=0)
+
+        fname = "test_map.csv"
+
+        self.env.save_map(fname)
+
+
 
 
 if __name__ == "__main__":
@@ -318,4 +331,6 @@ if __name__ == "__main__":
     # vis.main()
 
     vis.test_main()
+
+    # vis.map_test()
             
