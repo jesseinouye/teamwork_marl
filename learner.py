@@ -112,18 +112,18 @@ def train():
     seed = 0
 
     # Params from config?
-    episodes = 1        # TODO: is this naming correct?
-    batch_size = 1      # TODO: big powers of 2
-    frames_per_batch = 1
-    total_frames = frames_per_batch * episodes
-    memory_size = 10000         # TODO: increase this
+    episodes = 20        # TODO: is this naming correct?
+    batch_size = 32      # TODO: big powers of 2
+    frames_per_episode = 512
+    total_frames = frames_per_episode * episodes
+    memory_size = 100000         # TODO: increase this
     gamma = 0.95
     tau = 0.005
     lr = 5e-6
     # lr = 1e-3
     max_grad_norm = 40
-    n_epochs = 1
-    max_steps = 1     # Steps run during eval
+    n_epochs = 10
+    max_steps = 50     # Steps run during eval
 
 
     # Device
@@ -133,9 +133,11 @@ def train():
     torch.manual_seed(seed)
 
     # Set up environment
-    env = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed)
+    # env = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed,)
+    # env_test = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed)
 
-    env_test = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed)
+    env = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, fname="simple_map.csv")
+    env_test = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, fname="simple_map.csv")
 
     cnn = MultiAgentConvNet(
         n_agents=n_agents,
@@ -159,7 +161,7 @@ def train():
         centralised=False,
         share_params=False,
         depth=2,
-        num_cells=4096,     # TODO: reduce this
+        num_cells=256,     # TODO: reduce this
         activation_class=nn.ReLU,
         device=device
     )
@@ -213,7 +215,7 @@ def train():
         qnet_explore,
         device=device,
         storing_device=device,
-        frames_per_batch=frames_per_batch,
+        frames_per_batch=frames_per_episode,
         total_frames=total_frames
     )
 
@@ -265,7 +267,7 @@ def train():
         training_start = time.time()
         for j in range(n_epochs):
             # print("EPOCH: {}".format(j))
-            for k in range(frames_per_batch // batch_size):
+            for k in range(frames_per_episode // batch_size):
                 # print("BATCH: {}".format(k))
                 subdata = replay_buffer.sample()
 
