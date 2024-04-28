@@ -112,9 +112,9 @@ def train():
     seed = 0
 
     # Params from config?
-    episodes = 20        # TODO: is this naming correct?
-    batch_size = 32      # TODO: big powers of 2
-    frames_per_episode = 512
+    episodes = 50        # TODO: is this naming correct? should probably be something like "collections"
+    batch_size = 512      # TODO: big powers of 2
+    frames_per_episode = 4096
     total_frames = frames_per_episode * episodes
     memory_size = 100000         # TODO: increase this
     gamma = 0.95
@@ -133,11 +133,11 @@ def train():
     torch.manual_seed(seed)
 
     # Set up environment
-    # env = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed,)
-    # env_test = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed)
+    env = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, max_steps=1024)
+    env_test = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, max_steps=1024)
 
-    env = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, fname="simple_map.csv")
-    env_test = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, fname="simple_map.csv")
+    # env = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, fname="simple_map.csv")
+    # env_test = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, fname="simple_map.csv")
 
     cnn = MultiAgentConvNet(
         n_agents=n_agents,

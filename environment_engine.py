@@ -50,10 +50,10 @@ class Agent():
 # Environment engine
 class EnvEngine(EnvBase):
 
-    def __init__(self, n_agents=2, device="cpu", map_size=32, agent_abilities=[[1], [1]], seed=None, fname=None) -> None:
+    def __init__(self, n_agents=2, device="cpu", map_size=32, agent_abilities=[[1], [1]], seed=None, fname=None, max_steps=None) -> None:
         # Check valid inputs
         if len(agent_abilities) != n_agents:
-            raise ValueError("ERROR: length of agent ability list (agent_abilities) must match number of agents (n_agents)")
+            raise ValueError("ERROR: length of agent ability list (agent_abilities) must match number of agents (n_agents)")    
         
         # Set seed
         if seed is not None:
@@ -72,8 +72,14 @@ class EnvEngine(EnvBase):
         # Parameters
         self.rows = map_size
         self.cols = map_size    # TODO: change this to allow rectangles?
+        self.map_area = self.rows * self.cols
 
         self.agent_obs_dist = 3
+
+        if max_steps is not None:
+            self.max_steps = max_steps
+        else:
+            self.max_steps = 1000
 
         if fname is None:
             # If no filename give, generate map
@@ -108,11 +114,21 @@ class EnvEngine(EnvBase):
             self.load_agent(abilities=agent_abilities[i])
 
         # TODO: figure out how to define this - determined by whether we use a CNN or flattened tensor?
-        self.obs_size = self.rows * self.cols
+        # self.obs_size = self.rows * self.cols
+
+        # self.num_walkable_tiles = torch.sum((self.obs_map == CellType.FLOOR))
+        # self.num_walkable_tiles += torch.sum((self.obs_map == CellType.GRASS))
+        # self.num_walkable_tiles += torch.sum((self.obs_map == CellType.WATER))
+
+        # self.walkable_tile_indices = (self.map == CellType.FLOOR).nonzero(as_tuple=True)
+        # torch.cat(self.walkable_tile_indices, (self.map == CellType.GRASS).nonzero(as_tuple=True))
+        # torch.cat(self.walkable_tile_indices, (self.map == CellType.WATER).nonzero(as_tuple=True))
 
         self.cur_step_reward = 0
 
         self.cur_step = 0
+
+        self.episode_reward = 0
 
         # Make spec for action and observation
         self._make_spec()
@@ -130,7 +146,7 @@ class EnvEngine(EnvBase):
         self.done_spec = DiscreteTensorSpec(
             n=2,
             shape=torch.Size((1,)),
-            dtype=torch.int8,
+            dtype=torch.bool,
             device=self.device
         )
 
@@ -255,12 +271,35 @@ class EnvEngine(EnvBase):
         state = self.state_map
 
         # reward = torch.tensor([self.cur_step_reward], device=self.device, dtype=torch.float32)
-        reward = torch.tensor([reward], device=self.device, dtype=torch.float32)
+        self.episode_reward += reward
 
         # print("step -- actions: {} -- reward: {}".format(acts, reward))
 
-        # TODO: Calculate if done
-        done = torch.tensor([0], device=self.device)
+        ep_done = 0
+
+        # TODO: Calculate if done via exploration
+        num_unknown = torch.sum((self.obs_map == CellType.UNKNOWN))
+        percent_explored = 1 - (num_unknown / self.map_area)
+
+        # If explored map over a threshold, end episode
+        if percent_explored > 0.9:
+            print("Map explored - ending episode - episode reward: {}".format(self.episode_reward))
+            ep_done = 1
+            reward += 50
+
+
+        # If number of steps exceeds max steps, end episode
+        if self.cur_step > self.max_steps:
+            print("Steps exceeded - ending episode - episode reward: {}".format(self.episode_reward))
+            ep_done = 1
+            reward -= 100
+            # TODO: if whole map not explored, do negative reward
+            #       negative reward = number of tiles left UNKNOWN ?
+
+        reward = torch.tensor([reward], device=self.device, dtype=torch.float32)
+
+        done = torch.tensor([ep_done], device=self.device, dtype=torch.bool)
+
 
 
         # TODO: fix these to output actual data
@@ -269,7 +308,7 @@ class EnvEngine(EnvBase):
         # obs = torch.zeros(self.n_agents, self.obs_size)
 
         # TODO: remove action_mask from the spec (it's not needed - used to dynamically mask valid/invalid actions)
-        mask = torch.tensor([[1, 1, 1, 1, 1]] * self.n_agents, device=self.device)
+        mask = torch.tensor([[1, 1, 1, 1, 1]] * self.n_agents, device=self.device, dtype=torch.int8)
 
         # state = torch.zeros(self.n_agents, self.obs_size)
 
@@ -279,8 +318,8 @@ class EnvEngine(EnvBase):
 
         info = TensorDict(
             source={
-                "episode_limit": torch.tensor([100], device=self.device),
-                "map_explored": torch.tensor([0], device=self.device)
+                "episode_limit": torch.tensor([100], device=self.device, dtype=torch.int8),
+                "map_explored": torch.tensor([0], device=self.device, dtype=torch.int8)
             },
             batch_size=(),
             device=self.device
@@ -307,9 +346,10 @@ class EnvEngine(EnvBase):
     def _reset(self, tensordict:TensorDictBase):
         # Clear observed map
         # Move all agents to start (upper left corner)
-        # print("resetting!!")
+        print("resetting!!")
 
         self.cur_step = 0
+        self.episode_reward = 0
 
         # Clear observed and state maps
         self.clear_obs_map()
@@ -755,7 +795,7 @@ class EnvEngine(EnvBase):
         self.ensure_connectivity()
 
         # self.map = np.array(self.map)
-        self.map = torch.tensor(self.map)
+        self.map = torch.tensor(self.map, dtype=torch.float32)
 
         print("Map generation complete")
         return self.map
