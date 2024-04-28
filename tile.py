@@ -3,17 +3,16 @@ from enum import IntEnum
 
 
 class CellType(IntEnum):
-    UNDEFINED = 0   # Default
+    UNKNOWN = 0   # Default
     FLOOR = 1       # Floor cell
     WALL = 2        # Wall cell
     GRASS = 3       # Grass cell
     WATER = 4       # Water cell
     OOB = 5         # Out Of Bounds (OOB) cell
-    UNKNOWN = 6     # Agent doesn't know what type
-    AGENT_1 = 7     # Agent 1 in this cell
-    AGENT_2 = 8     # Agent 2 in this cell
-    AGENT_3 = 9     # Agent 3 in this cell
-    AGENT_4 = 10    # Agent 4 in this cell
+    AGENT_1 = 6     # Agent 1 in this cell
+    AGENT_2 = 7     # Agent 2 in this cell
+    AGENT_3 = 8     # Agent 3 in this cell
+    AGENT_4 = 9    # Agent 4 in this cell
 
     def is_observable(self):
          # Cells that are considered observed if they are known types of terrain
@@ -21,7 +20,7 @@ class CellType(IntEnum):
 
 
 class Tile:
-    def __init__(self, cell_type=CellType.UNDEFINED):
+    def __init__(self, cell_type=CellType.UNKNOWN):
         self.cell_type = cell_type
         self.observed = False  # Initially, the tile has not been observed.
 

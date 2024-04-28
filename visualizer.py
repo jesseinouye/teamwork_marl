@@ -200,8 +200,9 @@ class Visualizer():
         pygame.display.set_caption("SLAM Visualizer")
         screen.fill(WHITE)
 
+        self.init_env(seed=0)
         # self.init_env(seed=0, fname="simple_map.csv")
-        self.init_env(seed=0, fname="simple_map.csv")
+        # self.init_env(seed=0, fname="test_map.csv")
 
         running = True
 
