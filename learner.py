@@ -1,3 +1,4 @@
+import json
 import time
 import torch
 
@@ -111,19 +112,34 @@ def train():
 
     seed = 0
 
-    # Params from config?
-    collector_runs = 20         # TODO: is this naming correct? should probably be something like "collections"
-    batch_size = 64             # TODO: big powers of 2
-    frames_per_collector_run = 4096
+    # # Params from config?
+    # collector_runs = 20         # TODO: is this naming correct? should probably be something like "collections"
+    # batch_size = 64             # TODO: big powers of 2
+    # frames_per_collector_run = 4096
+    # total_frames = frames_per_collector_run * collector_runs
+    # memory_size = 100000         # TODO: increase this
+    # gamma = 0.99
+    # tau = 0.005
+    # lr = 5e-5
+    # # lr = 1e-3
+    # max_grad_norm = 40
+    # n_epochs = 5
+    # max_steps = 50     # Steps run during eval
+
+
+    # Fast test params
+    collector_runs = 1         # TODO: is this naming correct? should probably be something like "collections"
+    batch_size = 2             # TODO: big powers of 2
+    frames_per_collector_run = 16
     total_frames = frames_per_collector_run * collector_runs
-    memory_size = 100000         # TODO: increase this
+    memory_size = 1000         # TODO: increase this
     gamma = 0.99
     tau = 0.005
     lr = 5e-5
     # lr = 1e-3
     max_grad_norm = 40
-    n_epochs = 5
-    max_steps = 50     # Steps run during eval
+    n_epochs = 2
+    max_steps = 10     # Steps run during eval
 
 
     # Device
@@ -321,6 +337,8 @@ def train():
                 break_when_any_done=False
             )
 
+            save_actions_to_file("eval_{}_iter_{}.json".format(time.strftime("%Y%m%d-%H%M%S"), i), rollouts["agents", "action"], seed)
+
             evaluation_time = time.time() - evaluation_start
 
             print("  eval_time: {}".format(evaluation_time))
@@ -377,6 +395,14 @@ def train():
         print("result: {}".format(result.shape))
 
 
+def save_actions_to_file(fname, actions, seed):
+    # for step in actions:
+    #     print("step: {}".format(step))
+    list_actions = [step.tolist() for step in actions]
+    dict_actions = {"seed" : seed, "actions" : list_actions}
+
+    with open(fname, 'w') as fp:
+        json.dump(dict_actions, fp)
 
 
 

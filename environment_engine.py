@@ -116,9 +116,9 @@ class EnvEngine(EnvBase):
         # TODO: figure out how to define this - determined by whether we use a CNN or flattened tensor?
         # self.obs_size = self.rows * self.cols
 
-        # self.num_walkable_tiles = torch.sum((self.obs_map == CellType.FLOOR))
-        # self.num_walkable_tiles += torch.sum((self.obs_map == CellType.GRASS))
-        # self.num_walkable_tiles += torch.sum((self.obs_map == CellType.WATER))
+        self.num_walkable_tiles = torch.sum((self.map == CellType.FLOOR))
+        self.num_walkable_tiles += torch.sum((self.map == CellType.GRASS))
+        self.num_walkable_tiles += torch.sum((self.map == CellType.WATER))
 
         # self.walkable_tile_indices = (self.map == CellType.FLOOR).nonzero(as_tuple=True)
         # torch.cat(self.walkable_tile_indices, (self.map == CellType.GRASS).nonzero(as_tuple=True))
@@ -284,8 +284,18 @@ class EnvEngine(EnvBase):
         ep_done = 0
 
         # TODO: Calculate if done via exploration
-        num_unknown = torch.sum((self.obs_map == CellType.UNKNOWN))
-        percent_explored = 1 - (num_unknown / self.map_area)
+
+        # Count number of observed cells that are walkable
+        num_obs_walkable_cells = torch.sum((self.obs_map == CellType.FLOOR))
+        num_obs_walkable_cells += torch.sum((self.obs_map == CellType.WATER))
+        num_obs_walkable_cells += torch.sum((self.obs_map == CellType.GRASS))
+
+        # num_obs_walkable_cells = torch.sum(((self.obs_map == CellType.FLOOR) or (self.obs_map == CellType.WATER) or (self.obs_map == CellType.GRASS)))
+
+        percent_explored = num_obs_walkable_cells / self.num_walkable_tiles
+
+        # num_unknown = torch.sum((self.obs_map == CellType.UNKNOWN))
+        # percent_explored = 1 - (num_unknown / self.map_area)
 
         # If explored map over a threshold, end episode
         if percent_explored > 0.9:
@@ -693,11 +703,6 @@ class EnvEngine(EnvBase):
     def test_calc_agent_observation(self, agent:Agent):
         x, y = agent.position
 
-        # x0 = x - agent.rangeOfSight if x > agent.rangeOfSight else 0
-        # x1 = x + agent.rangeOfSight if 
-        # y0 = y - agent.rangeOfSight
-        # y1 = y + agent.rangeOfSight
-
         x0 = max(0, x - agent.rangeOfSight)
         x1 = min(self.rows, x + agent.rangeOfSight)
         y0 = max(0, y - agent.rangeOfSight)
@@ -705,14 +710,9 @@ class EnvEngine(EnvBase):
 
         # Get number of unknown cells in obs_map within agent's range of sight (this is the reward)
         num_unknown = torch.sum((self.obs_map[x0:x1+1, y0:y1+1] == CellType.UNKNOWN))
+
         # Update obs_map with true cell values
         self.obs_map[x0:x1+1, y0:y1+1] = self.map[x0:x1+1, y0:y1+1]
-
-
-        # # Get number of unknown cells in obs_map within agent's range of sight (this is the reward)
-        # num_unknown = torch.sum((self.obs_map[x-agent.rangeOfSight:x+agent.rangeOfSight+1, y-agent.rangeOfSight:y+agent.rangeOfSight+1] == CellType.UNKNOWN))
-        # # Update obs_map with true cell values
-        # self.obs_map[x-agent.rangeOfSight:x+agent.rangeOfSight+1, y-agent.rangeOfSight:y+agent.rangeOfSight+1] = self.map[x-agent.rangeOfSight:x+agent.rangeOfSight+1, y-agent.rangeOfSight:y+agent.rangeOfSight+1]
         
         # NOTE: Don't need to return agent specific observations here because we want to calculate
         #       all observations of all agents first, then create individual observations

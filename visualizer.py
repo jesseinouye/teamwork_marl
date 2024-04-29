@@ -1,3 +1,4 @@
+import json
 import pygame
 import random
 import torch
@@ -313,6 +314,68 @@ class Visualizer():
             pygame.time.delay(200)
 
 
+    def vis_from_file_playback(self, fname):
+        self.init_game_vis()
+
+        with open(fname) as f:
+            data = json.load(f)
+
+        print("data: {}".format(data))
+
+        self.init_env(seed=data["seed"])
+
+        running = True
+
+        # Reset env to start
+        self.env.reset()
+
+        actions = data["actions"]
+
+        for action in actions:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                    pygame.quit()
+                    return
+                
+            action = torch.tensor(action)
+
+            print("actions: {}".format(action))
+
+            action = TensorDict(
+                {"agents": TensorDict(
+                    {"action": action},
+                    batch_size=(),
+                    device=self.device)
+                },
+                batch_size=(),
+                device=self.device
+            )
+                
+            self.env.step(action)
+
+            # print("actions:\n{}".format(actions))
+            print("reward: {}".format(action["next", "reward"][0]))
+
+            # Get observation (map) from output of step
+            obs_map = action["next", "agents", "observation"]
+            obs_map = obs_map[0,0].numpy()
+
+            # Get ground truth state (map) from output of step
+            map = action["next", "state"]
+            map = map.numpy()
+
+            # Draw ground truth and observation maps
+            self.draw_map_vis(self.screen, map)
+            self.draw_observation_map_vis(self.screen, obs_map)
+            
+            # Update pygame display
+            # Adding a small delay can make the agent's movement easier to observe
+            pygame.display.update()
+            pygame.time.delay(500)
+
+
+
     def map_test(self):
         screen = pygame.display.set_mode((FULL_WIDTH, HEIGHT))
         pygame.display.set_caption("SLAM Visualizer")
@@ -331,7 +394,10 @@ if __name__ == "__main__":
     vis = Visualizer()
     # vis.main()
 
-    vis.test_main()
+    # vis.test_main()
 
     # vis.map_test()
+
+    fname = "eval_20240429-130711_iter_0.json"
+    vis.vis_from_file_playback(fname)
             
