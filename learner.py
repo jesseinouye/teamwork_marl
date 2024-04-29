@@ -25,84 +25,7 @@ from torchrl.objectives.multiagent.qmixer import QMixerLoss
 from torchsummary import summary
 
 
-# I think this is the right order?
-# Still not sure where reward comes in to play
-#   - I think it gets piped into the loss module during training?
 
-# cnn_module = MultiAgentConvNet > TensorDictModule
-# mlp_module = MultiAgentMLP > TensorDictModule
-# val_module = QValueModule
-# qnet = SafeSequential(cnn_module, mlp_module, val_module)
-# mixer = TensorDictModule(QMixer())
-# loss_module = QMixerLoss(qnet, mixer)
-
-
-
-
-# ==================================================================================
-# Testing
-
-class AlexNet(nn.Module):
-    def __init__(self, output_dim):
-        super().__init__()
-        
-        self.features = nn.Sequential(
-            # Define according to the steps described above
-            # Layer 1
-            nn.Conv2d(3, 64, 3, stride=2, padding=(1,1)),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),
-            # Layer 2
-            nn.Conv2d(64, 192, 3, stride=1, padding=(1,1)),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),
-            # Layer 3
-            nn.Conv2d(192, 384, 3, stride=1, padding=(1,1)),
-            nn.ReLU(inplace=True),
-            # # Layer 4
-            # nn.Conv2d(384, 256, 3, stride=1, padding=(1,1)),
-            # nn.ReLU(inplace=True),
-            # # Layer 5
-            # nn.Conv2d(256, 256, 3, stride=1, padding=(1,1)),
-            # nn.ReLU(inplace=True),
-            # nn.MaxPool2d(2),
-        )
-        
-        self.classifier = nn.Sequential(
-            # define according to the steps described above
-            # Layer 1
-            nn.Dropout(p=0.5),
-            nn.Linear(1024, 4096),
-            nn.ReLU(inplace=True),
-            # Layer 2
-            nn.Dropout(p=0.5),
-            nn.Linear(4096, 4096),
-            nn.ReLU(inplace=True),
-            # Layer 3
-            nn.Linear(4096, 10)
-        )
-
-    def forward(self, x):
-        x = self.features(x)
-        h = x.view(x.shape[0], -1)
-        x = self.classifier(h)
-        return x, h
-
-def tmp_func():
-    model = AlexNet(output_dim=10)
-
-    print(summary(model,(3,32,32)))
-
-
-def test_func():
-    n_agents = 2
-    env = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]])
-
-    print("obs spec: {}".format(env.observation_spec))
-
-
-# ==================================================================================
-# Actual code
 
 def train():
     n_agents = 2
@@ -112,34 +35,34 @@ def train():
 
     seed = 0
 
-    # # Params from config?
-    # collector_runs = 20         # TODO: is this naming correct? should probably be something like "collections"
-    # batch_size = 64             # TODO: big powers of 2
-    # frames_per_collector_run = 4096
+    # Params from config?
+    collector_runs = 25         # TODO: is this naming correct? should probably be something like "collections"
+    batch_size = 64             # TODO: big powers of 2
+    frames_per_collector_run = 8192
+    total_frames = frames_per_collector_run * collector_runs
+    memory_size = 100000         # TODO: increase this
+    gamma = 0.99
+    tau = 0.005
+    lr = 5e-4
+    # lr = 1e-3
+    max_grad_norm = 10
+    n_epochs = 10
+    max_steps = 200     # Steps run during eval
+
+
+    # # Fast test params
+    # collector_runs = 1         # TODO: is this naming correct? should probably be something like "collections"
+    # batch_size = 2             # TODO: big powers of 2
+    # frames_per_collector_run = 16
     # total_frames = frames_per_collector_run * collector_runs
-    # memory_size = 100000         # TODO: increase this
+    # memory_size = 1000         # TODO: increase this
     # gamma = 0.99
     # tau = 0.005
     # lr = 5e-5
     # # lr = 1e-3
     # max_grad_norm = 40
-    # n_epochs = 5
-    # max_steps = 50     # Steps run during eval
-
-
-    # Fast test params
-    collector_runs = 1         # TODO: is this naming correct? should probably be something like "collections"
-    batch_size = 2             # TODO: big powers of 2
-    frames_per_collector_run = 16
-    total_frames = frames_per_collector_run * collector_runs
-    memory_size = 1000         # TODO: increase this
-    gamma = 0.99
-    tau = 0.005
-    lr = 5e-5
-    # lr = 1e-3
-    max_grad_norm = 40
-    n_epochs = 2
-    max_steps = 10     # Steps run during eval
+    # n_epochs = 2
+    # max_steps = 10     # Steps run during eval
 
 
     # Device
@@ -206,9 +129,9 @@ def train():
     qnet_explore = TensorDictSequential(
         qnet,
         EGreedyModule(
-            eps_init=0.9,
+            eps_init=1.0,
             eps_end=0.05,
-            annealing_num_steps=2500,
+            annealing_num_steps=50000,
             action_key=("agents", "action"),
             spec=env.action_spec
         )
