@@ -112,17 +112,17 @@ def train():
     seed = 0
 
     # Params from config?
-    episodes = 50        # TODO: is this naming correct? should probably be something like "collections"
-    batch_size = 512      # TODO: big powers of 2
-    frames_per_episode = 4096
-    total_frames = frames_per_episode * episodes
+    collector_runs = 20         # TODO: is this naming correct? should probably be something like "collections"
+    batch_size = 64             # TODO: big powers of 2
+    frames_per_collector_run = 4096
+    total_frames = frames_per_collector_run * collector_runs
     memory_size = 100000         # TODO: increase this
-    gamma = 0.95
+    gamma = 0.99
     tau = 0.005
-    lr = 5e-6
+    lr = 5e-5
     # lr = 1e-3
     max_grad_norm = 40
-    n_epochs = 10
+    n_epochs = 5
     max_steps = 50     # Steps run during eval
 
 
@@ -133,8 +133,8 @@ def train():
     torch.manual_seed(seed)
 
     # Set up environment
-    env = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, max_steps=1024)
-    env_test = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, max_steps=1024)
+    env = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, max_steps=200)
+    env_test = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, max_steps=200)
 
     # env = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, fname="simple_map.csv")
     # env_test = EnvEngine(n_agents=n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=device, seed=seed, fname="simple_map.csv")
@@ -190,9 +190,9 @@ def train():
     qnet_explore = TensorDictSequential(
         qnet,
         EGreedyModule(
-            eps_init=0.5,
-            eps_end=0.1,
-            annealing_num_steps=1000,
+            eps_init=0.9,
+            eps_end=0.05,
+            annealing_num_steps=2500,
             action_key=("agents", "action"),
             spec=env.action_spec
         )
@@ -215,7 +215,7 @@ def train():
         qnet_explore,
         device=device,
         storing_device=device,
-        frames_per_batch=frames_per_episode,
+        frames_per_batch=frames_per_collector_run,
         total_frames=total_frames
     )
 
@@ -267,7 +267,7 @@ def train():
         training_start = time.time()
         for j in range(n_epochs):
             # print("EPOCH: {}".format(j))
-            for k in range(frames_per_episode // batch_size):
+            for k in range(frames_per_collector_run // batch_size):
                 # print("BATCH: {}".format(k))
                 subdata = replay_buffer.sample()
 
@@ -330,7 +330,7 @@ def train():
         # print("rollout:\n{}".format(rollouts))
 
         # TODO: is it right to reset here? Otherwise the collector doesn't reset the env before it collects more samples?
-        env.reset()
+        # env.reset()
         sampling_start = time.time()
 
     print("total_time: {}".format(time.time() - start_time))
