@@ -130,6 +130,12 @@ class EnvEngine(EnvBase):
 
         self.episode_reward = 0
 
+        # Adjustable params
+        self.ability_tile_reward_mod = 2
+        self.negative_reward_mod = -2
+
+
+
         # Make spec for action and observation
         self._make_spec()
 
@@ -240,9 +246,9 @@ class EnvEngine(EnvBase):
 
         # Move each agent in order and build observation map
         for i, action in enumerate(acts):
-            # Move agent
-            self.move_agent(self.agents[i], Action(action.item()))
-            # Calculate agent observation and accumulate reward
+            # Move agent, get reward from movement
+            reward += self.move_agent(self.agents[i], Action(action.item()))
+            # Calculate agent observation and accumulate reward from viewing new cells
             reward += self.test_calc_agent_observation(self.agents[i])
 
         # Update individual agent observation maps with new full observation map and agent location
@@ -498,6 +504,7 @@ class EnvEngine(EnvBase):
     def move_agent(self, agent: Agent, dir):
         # Define move initially as None to handle unexpected cases
         move = None
+        reward_mod = 0
 
         if dir == Action.WEST:
             move = (0, -1)
@@ -512,9 +519,12 @@ class EnvEngine(EnvBase):
         if move is not None:
             # print(agent.position, move)
             n_row, n_col = agent.position[0] + move[0], agent.position[1] + move[1]
+            
+            move_valid, reward_mod = self.check_agent_ability(agent, dir, n_row, n_col)
 
-            # Correctly call and use the result of check_agent_ability
-            if self.check_agent_ability(agent, dir, n_row, n_col):
+            # If agent is able to move to new cell
+            # if self.check_agent_ability(agent, dir, n_row, n_col):
+            if move_valid:
                 # Update state map cell of agent's old position
                 self.state_map[agent.position] = self.map[agent.position]
                 # Update agent position to new location
@@ -525,39 +535,68 @@ class EnvEngine(EnvBase):
         # else:
             # print(f"Invalid direction {dir}")
 
+        return reward_mod
+
 
     # Move agent in specified direction, if valid
     def check_agent_ability(self, agent:Agent, dir, n_row, n_col):
+        move_valid = False
+        reward_mod = 0
+
+        # Check if position out of bounds
         if n_row < 0 or n_row >= len(self.map) or n_col < 0 or n_col >= len(self.map[0]):
-            # Position is out of bounds
-            return False
+            move_valid = False
+            reward_mod = self.negative_reward_mod
+            return move_valid, reward_mod
 
-        # match self.map[n_row, n_col].get_type():
-        match self.map[n_row, n_col]:
-            case CellType.OOB:
-                # Agent can't move out of bounds
-                return False
-            case CellType.WALL:
-                # Agent can't move into walls
-                return False
-            case CellType.GRASS:
-                if 3 not in agent.abilities:
-                    # Agent can't move into grass
-                    return False
-            case CellType.WATER:
-                if 4 not in agent.abilities:
-                    # Agent can't move into water
-                    return False
-                
-            # we don't check floor because it's the default walkable cell type
-
-        # Move agent to new position if not already occupied
+        # Check if cell already occupied
         for check_agent in self.agents:
             if check_agent.position == (n_row, n_col):
-                # print("Position {} already occupied by agent {}".format(check_agent.position, check_agent.id))
-                return False
+                move_valid = False
+                return move_valid, reward_mod
+
+        # Check type of cell the agent is attempting to move to
+        match self.map[n_row, n_col]:
+            case CellType.FLOOR:
+                move_valid = True
+            case CellType.GRASS:
+                if CellType.GRASS in agent.abilities:
+                    move_valid = True
+                    reward_mod = self.ability_tile_reward_mod
+                else:
+                    reward_mod = self.negative_reward_mod
+            case CellType.WATER:
+                if CellType.WATER in agent.abilities:
+                    move_valid = True
+                    reward_mod = self.ability_tile_reward_mod
+                else:
+                    reward_mod = self.negative_reward_mod
+            case CellType.WALL:
+                move_valid = False
+                reward_mod = self.negative_reward_mod
                 
-        return True
+        return move_valid, reward_mod
+
+        # # match self.map[n_row, n_col].get_type():
+        # match self.map[n_row, n_col]:
+        #     case CellType.OOB:
+        #         # Agent can't move out of bounds
+        #         return False
+        #     case CellType.WALL:
+        #         # Agent can't move into walls
+        #         return False
+        #     case CellType.GRASS:
+        #         if 3 not in agent.abilities:
+        #             # Agent can't move into grass
+        #             return False
+        #     case CellType.WATER:
+        #         if 4 not in agent.abilities:
+        #             # Agent can't move into water
+        #             return False
+                
+        #     # we don't check floor because it's the default walkable cell type
+
+        # return True
 
     def get_agent_ability(self, agent:Agent):
         return agent.abilities
