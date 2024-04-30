@@ -181,6 +181,13 @@ class EnvEngine(EnvBase):
             dtype=torch.float32,
             device=self.device
         )
+        non_normalized_obs_spec = DiscreteTensorSpec(
+            n=len(CellType),
+            # shape=torch.Size((self.n_agents, self.obs_size)),
+            shape=torch.Size((self.n_agents, self.rows, self.cols)),
+            dtype=torch.float32,
+            device=self.device
+        )
         info_spec = CompositeSpec(
             {
                 "episode_limit": DiscreteTensorSpec(
@@ -200,7 +207,7 @@ class EnvEngine(EnvBase):
         spec = CompositeSpec(
             {
                 "agents": CompositeSpec(
-                    {"observation": obs_spec, "action_mask": mask_spec},
+                    {"observation": obs_spec, "action_mask": mask_spec, "non_normalized_obs": non_normalized_obs_spec},
                     shape=torch.Size((self.n_agents,))
                 ),
                 "state": DiscreteTensorSpec(
@@ -210,7 +217,14 @@ class EnvEngine(EnvBase):
                     dtype=torch.float32,
                     device=self.device
                 ),
-                "info": info_spec
+                "info": info_spec,
+                "non_normalized_state": DiscreteTensorSpec(
+                    n=len(CellType),
+                    # shape=torch.Size((self.n_agents, self.obs_size)),
+                    shape=torch.Size((self.rows, self.cols)),
+                    dtype=torch.float32,
+                    device=self.device
+                )
             }
         )
         return spec
@@ -233,7 +247,6 @@ class EnvEngine(EnvBase):
         #   After all agent actions done
         #   - Calculate reward from observation and prev observed map?
         #   - Update observed map
-        
         actions = tensordict["agents", "action"]
 
         # Get decoded movements from one-hot tensor
@@ -242,7 +255,7 @@ class EnvEngine(EnvBase):
         all_agent_obs = []
         self.cur_step_reward = 0
 
-        reward = 0
+        reward = 0.0
 
         # Move each agent in order and build observation map
         for i, action in enumerate(acts):
@@ -251,6 +264,13 @@ class EnvEngine(EnvBase):
             # Calculate agent observation and accumulate reward from viewing new cells
             reward += self.test_calc_agent_observation(self.agents[i])
 
+        # Normalize reward between 0-1
+        #   - Lowest reward possible is all agents attempting invalid move (negative_reward_mod * n_agents)
+        #   - Highest reward possible is all agents seeing new tiles (agent_obs_dist * 2 + 1)
+        #     and all agents moving into specialized tile (ability_tile_reward_mod * n_agents)
+        # reward += -(self.negative_reward_mod * self.n_agents)
+        # reward /= ((self.agent_obs_dist * 2 + 1) * self.n_agents) + (self.ability_tile_reward_mod * self.n_agents)
+
         # Update individual agent observation maps with new full observation map and agent location
         for agent in self.agents:
             self.all_agent_obs[agent.id, :] = self.obs_map
@@ -258,6 +278,10 @@ class EnvEngine(EnvBase):
             # agent.observation[:] = self.obs_map
             # agent.observation[agent.position] = self.get_agent_cell_from_id(agent)
 
+        # TODO: normalize observation between 0-1
+        # # Normalize between 0-1 (divide by cell value of last agent, which is the highest possible cell value)
+        # self.all_agent_obs[agent.id] /= self.get_agent_cell_from_id(self.agents[-1])
+        
         obs = self.all_agent_obs
 
         # # Move each agent in order
@@ -275,6 +299,10 @@ class EnvEngine(EnvBase):
 
         # state = torch.tensor(self.map_to_numeric(self.state_map), dtype=torch.float32)
         state = self.state_map
+
+        # TODO: normalize state between 0-1
+        # state = self.state_map / self.get_agent_cell_from_id(self.agents[-1])
+
 
         # reward = torch.tensor([self.cur_step_reward], device=self.device, dtype=torch.float32)
         self.episode_reward += reward
@@ -301,14 +329,14 @@ class EnvEngine(EnvBase):
         if percent_explored > 0.9:
             print("Map explored - ending episode - episode reward: {}".format(self.episode_reward))
             ep_done = 1
-            reward += 50
+            # reward += 50
 
 
         # If number of steps exceeds max steps, end episode
         if self.cur_step > self.max_steps:
             print("Steps exceeded - ending episode - episode reward: {}".format(self.episode_reward))
             ep_done = 1
-            reward -= 100
+            # reward -= 100
             # TODO: if whole map not explored, do negative reward
             #       negative reward = number of tiles left UNKNOWN ?
 
