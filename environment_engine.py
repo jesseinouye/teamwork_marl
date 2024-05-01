@@ -132,7 +132,7 @@ class EnvEngine(EnvBase):
 
         # Adjustable params
         self.ability_tile_reward_mod = 2
-        self.negative_reward_mod = -2
+        self.negative_reward_mod = 0
 
 
 
