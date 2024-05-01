@@ -150,32 +150,35 @@ class TeamExplore():
         return qnet
 
     def train(self):
-        # # Training params
-        # collector_runs = 5         # TODO: is this naming correct? should probably be something like "collections"
-        # frames_per_collector_run = 4096
-        # total_frames = frames_per_collector_run * collector_runs   
-        # memory_size = 100000         # TODO: increase this
-        # batch_size = 256             # TODO: big powers of 2
-        # gamma = 0.99
-        # tau = 0.005
-        # lr = 5e-4
-        # max_grad_norm = 10
-        # n_epochs = 5
-        # max_steps = 200     # Steps run during eval
+        # NOTE: epsilon updates every collector run, decreases linearly by < new_eps = old eps - ((eps_start - eps_end) / (eps_steps / frames_per_collector_run)) >
+        # NOTE: learning rate optimizer steps every batch  < # steps total = ((frames_per_collector_run / batch_size) * n_epochs) * collector_runs >
 
-
-        # Fast training params
-        collector_runs = 15         # TODO: is this naming correct? should probably be something like "collections"
-        frames_per_collector_run = 128
-        total_frames = frames_per_collector_run * collector_runs
-        memory_size = 1000         # TODO: increase this
-        batch_size = 16             # TODO: big powers of 2
+        # Training params
+        collector_runs = 20         # TODO: is this naming correct? should probably be something like "collections"
+        frames_per_collector_run = 4096
+        total_frames = frames_per_collector_run * collector_runs   
+        memory_size = 100000         # TODO: increase this
+        batch_size = 512             # TODO: big powers of 2
         gamma = 0.99
         tau = 0.005
         lr = 5e-5
         max_grad_norm = 40
-        n_epochs = 2
-        max_steps = 64     # Steps run during eval
+        n_epochs = 10
+        max_steps = 128     # Steps run during eval
+
+
+        # # Fast training params
+        # collector_runs = 5         # TODO: is this naming correct? should probably be something like "collections"
+        # frames_per_collector_run = 128
+        # total_frames = frames_per_collector_run * collector_runs
+        # memory_size = 1000         # TODO: increase this
+        # batch_size = 16             # TODO: big powers of 2
+        # gamma = 0.99
+        # tau = 0.005
+        # lr = 5e-5
+        # max_grad_norm = 40
+        # n_epochs = 2
+        # max_steps = 64     # Steps run during eval
 
         self.qnet = self.build_q_agents_shared_params()
 

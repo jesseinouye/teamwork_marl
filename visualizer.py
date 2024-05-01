@@ -372,7 +372,7 @@ class Visualizer():
             # Update pygame display
             # Adding a small delay can make the agent's movement easier to observe
             pygame.display.update()
-            pygame.time.delay(500)
+            pygame.time.delay(250)
 
 
 
@@ -398,6 +398,17 @@ if __name__ == "__main__":
 
     # vis.map_test()
 
-    fname = "eval_20240429-130711_iter_0.json"
+    # fname = "eval_20240429-130711_iter_0.json"
+
+    fname = "eval_20240501-122636_iter_46.json"
+    # fname = "eval_20240501-122624_iter_45.json"
+
+    # fname = "eval_20240501-125055_iter_33.json"
+
+    # fname = "eval_20240501-141132_iter_41.json"
+    # fname = "eval_20240501-141216_iter_43.json"
+
+    fname = "eval_20240501-143507_iter_19.json"
+
     vis.vis_from_file_playback(fname)
             
