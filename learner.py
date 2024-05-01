@@ -150,32 +150,32 @@ class TeamExplore():
         return qnet
 
     def train(self):
-        # Training params
-        collector_runs = 5         # TODO: is this naming correct? should probably be something like "collections"
-        frames_per_collector_run = 4096
-        total_frames = frames_per_collector_run * collector_runs   
-        memory_size = 100000         # TODO: increase this
-        batch_size = 256             # TODO: big powers of 2
-        gamma = 0.99
-        tau = 0.005
-        lr = 5e-4
-        max_grad_norm = 10
-        n_epochs = 5
-        max_steps = 200     # Steps run during eval
-
-
-        # # Fast training params
-        # collector_runs = 1         # TODO: is this naming correct? should probably be something like "collections"
-        # frames_per_collector_run = 16
-        # total_frames = frames_per_collector_run * collector_runs
-        # memory_size = 1000         # TODO: increase this
-        # batch_size = 2             # TODO: big powers of 2
+        # # Training params
+        # collector_runs = 5         # TODO: is this naming correct? should probably be something like "collections"
+        # frames_per_collector_run = 4096
+        # total_frames = frames_per_collector_run * collector_runs   
+        # memory_size = 100000         # TODO: increase this
+        # batch_size = 256             # TODO: big powers of 2
         # gamma = 0.99
         # tau = 0.005
-        # lr = 5e-5
-        # max_grad_norm = 40
-        # n_epochs = 2
-        # max_steps = 10     # Steps run during eval
+        # lr = 5e-4
+        # max_grad_norm = 10
+        # n_epochs = 5
+        # max_steps = 200     # Steps run during eval
+
+
+        # Fast training params
+        collector_runs = 15         # TODO: is this naming correct? should probably be something like "collections"
+        frames_per_collector_run = 128
+        total_frames = frames_per_collector_run * collector_runs
+        memory_size = 1000         # TODO: increase this
+        batch_size = 16             # TODO: big powers of 2
+        gamma = 0.99
+        tau = 0.005
+        lr = 5e-5
+        max_grad_norm = 40
+        n_epochs = 2
+        max_steps = 64     # Steps run during eval
 
         self.qnet = self.build_q_agents_shared_params()
 
@@ -230,6 +230,7 @@ class TeamExplore():
 
         optim = torch.optim.Adam(loss_module.parameters(), lr=lr)
 
+        episode_rewards = []
 
         total_frames = 0
         sampling_start = time.time()
@@ -291,6 +292,10 @@ class TeamExplore():
                     break_when_any_done=False
                 )
 
+                # print("rewards: {}".format(rollouts["next", "episode_reward"][-1].item()))
+
+                episode_rewards.append(rollouts["next", "episode_reward"][-1].item())
+
                 self.save_actions_to_file("eval_{}_iter_{}.json".format(time.strftime("%Y%m%d-%H%M%S"), i), rollouts["agents", "action"], self.seed)
 
                 evaluation_time = time.time() - evaluation_start
@@ -307,6 +312,9 @@ class TeamExplore():
             vis.init_game_vis()
             self.env_test.reset()
             vis.visualize_action_set(self.env_test, rollouts["agents", "action"])
+
+        plt.plot(episode_rewards)
+        plt.show()
 
     # Save tensor of actions to json file
     def save_actions_to_file(self, fname, actions, seed):

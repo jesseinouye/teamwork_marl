@@ -224,6 +224,10 @@ class EnvEngine(EnvBase):
                     shape=torch.Size((self.rows, self.cols)),
                     dtype=torch.float32,
                     device=self.device
+                ),
+                "episode_reward": UnboundedContinuousTensorSpec(
+                    shape=torch.Size((1,)),
+                    device=self.device
                 )
             }
         )
@@ -354,6 +358,8 @@ class EnvEngine(EnvBase):
         # TODO: remove action_mask from the spec (it's not needed - used to dynamically mask valid/invalid actions)
         mask = torch.tensor([[1, 1, 1, 1, 1]] * self.n_agents, device=self.device, dtype=torch.int8)
 
+        episode_reward = torch.tensor([self.episode_reward], device=self.device, dtype=torch.float32)
+
         # state = torch.zeros(self.n_agents, self.obs_size)
 
         agents_td = TensorDict(
@@ -375,6 +381,7 @@ class EnvEngine(EnvBase):
                 "state": state,
                 "info": info,
                 "reward": reward,
+                "episode_reward": episode_reward,
                 "done": done,
                 "terminated": done.clone()
             },
@@ -390,7 +397,7 @@ class EnvEngine(EnvBase):
     def _reset(self, tensordict:TensorDictBase):
         # Clear observed map
         # Move all agents to start (upper left corner)
-        print("resetting!!")
+        # print("resetting!!")
 
         self.cur_step = 0
         self.episode_reward = 0
@@ -448,6 +455,8 @@ class EnvEngine(EnvBase):
 
         # state = torch.zeros(self.n_agents, self.obs_size)
 
+        episode_reward = torch.tensor([self.episode_reward], device=self.device, dtype=torch.float32)
+
         agents_td = TensorDict(
             {"observation": obs, "action_mask": mask}, batch_size=(self.n_agents,)
         )
@@ -469,6 +478,7 @@ class EnvEngine(EnvBase):
                 "agents": agents_td,
                 "state": state,
                 "info": info,
+                "episode_reward": episode_reward
                 # "reward": reward,
                 # "done": done,
                 # "terminated": done.clone()
