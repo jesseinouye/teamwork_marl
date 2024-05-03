@@ -4,7 +4,9 @@ import torch
 
 import matplotlib.pyplot as plt
 
-from environment_engine import EnvEngine, Action, Agent, CellType
+from pathlib import Path
+
+from environment_engine import EnvEngine
 from visualizer import Visualizer
 
 from tensordict.nn import TensorDictModule, TensorDictSequential
@@ -14,15 +16,12 @@ from torchrl.collectors import SyncDataCollector
 from torchrl.data import TensorDictReplayBuffer
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from torchrl.data.replay_buffers.storages import LazyTensorStorage
-from torchrl.envs import RewardSum, TransformedEnv
-from torchrl.envs.libs.vmas import VmasEnv
+# from torchrl.envs import RewardSum, TransformedEnv
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 from torchrl.modules import EGreedyModule, QValueModule, SafeSequential, DistributionalDQNnet
-from torchrl.modules.models.multiagent import MultiAgentMLP, QMixer, VDNMixer, MultiAgentConvNet
+from torchrl.modules.models.multiagent import MultiAgentMLP, QMixer, MultiAgentConvNet
 from torchrl.objectives import SoftUpdate, ValueEstimators
 from torchrl.objectives.multiagent.qmixer import QMixerLoss
-
-from torchsummary import summary
 
 
 
@@ -42,8 +41,8 @@ class TeamExplore():
 
     # Build train and test environments
     def build_envs(self):
-        self.env = EnvEngine(n_agents=self.n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=self.device, seed=self.seed, max_steps=200)
-        self.env_test = EnvEngine(n_agents=self.n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=self.device, seed=self.seed, max_steps=200)
+        self.env = EnvEngine(n_agents=self.n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=self.device, seed=self.seed, max_steps=512)
+        self.env_test = EnvEngine(n_agents=self.n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=self.device, seed=self.seed, max_steps=512)
 
     # Build Q agent networks
     def build_q_agents(self):
@@ -154,17 +153,20 @@ class TeamExplore():
         # NOTE: learning rate optimizer steps every batch  < # steps total = ((frames_per_collector_run / batch_size) * n_epochs) * collector_runs >
 
         # Training params
-        collector_runs = 20         # TODO: is this naming correct? should probably be something like "collections"
-        frames_per_collector_run = 4096
+        collector_runs = 50         # TODO: is this naming correct? should probably be something like "collections"
+        frames_per_collector_run = 8192
         total_frames = frames_per_collector_run * collector_runs   
         memory_size = 100000         # TODO: increase this
         batch_size = 512             # TODO: big powers of 2
+        eps_init = 1.0
+        eps_end = 0.05
+        eps_num_steps = 50000
         gamma = 0.99
         tau = 0.005
         lr = 5e-5
         max_grad_norm = 40
         n_epochs = 10
-        max_steps = 128     # Steps run during eval
+        max_steps = 256     # Steps run during eval
 
 
         # # Fast training params
@@ -178,16 +180,21 @@ class TeamExplore():
         # lr = 5e-5
         # max_grad_norm = 40
         # n_epochs = 2
-        # max_steps = 64     # Steps run during eval
+        # max_steps = 32     # Steps run during eval
 
-        self.qnet = self.build_q_agents_shared_params()
+        shared_params = True
+
+        if shared_params:
+            self.qnet = self.build_q_agents_shared_params()
+        else:
+            self.qnet = self.build_q_agents()
 
         qnet_explore = TensorDictSequential(
             self.qnet,
             EGreedyModule(
-                eps_init=1.0,
-                eps_end=0.05,
-                annealing_num_steps=50000,
+                eps_init=eps_init,
+                eps_end=eps_end,
+                annealing_num_steps=eps_num_steps,
                 action_key=("agents", "action"),
                 spec=self.env.action_spec
             )
@@ -238,6 +245,10 @@ class TeamExplore():
         total_frames = 0
         sampling_start = time.time()
         start_time = time.time()
+
+        start_time_fname = time.strftime("%Y%m%d_%H%M%S")
+        save_dir = "data/{}/".format(start_time_fname)
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
 
         print("Enumerating collector")
         for i, tensordict_data in enumerate(collector):
@@ -299,7 +310,7 @@ class TeamExplore():
 
                 episode_rewards.append(rollouts["next", "episode_reward"][-1].item())
 
-                self.save_actions_to_file("eval_{}_iter_{}.json".format(time.strftime("%Y%m%d-%H%M%S"), i), rollouts["agents", "action"], self.seed)
+                self.save_actions_to_file("{}/eval_{}_iter_{}.json".format(save_dir, start_time_fname, i), rollouts["agents", "action"], self.seed)
 
                 evaluation_time = time.time() - evaluation_start
 
@@ -316,7 +327,35 @@ class TeamExplore():
             self.env_test.reset()
             vis.visualize_action_set(self.env_test, rollouts["agents", "action"])
 
+        data = {
+            "n_agents" :                    self.n_agents,
+            "agent_abilities" :             self.agent_abilities,
+            "seed" :                        self.seed,
+            "collector_runs" :              collector_runs,
+            "frames_per_collector_run" :    frames_per_collector_run,
+            "total_frames" :                total_frames,
+            "memory_size" :                 memory_size,
+            "batch_size" :                  batch_size,
+            "eps_init" :                    eps_init,
+            "eps_end" :                     eps_end,
+            "eps_num_steps" :               eps_num_steps,
+            "gamma" :                       gamma,
+            "tau" :                         tau,
+            "lr" :                          lr,
+            "max_grad_norm" :               max_grad_norm,
+            "n_epochs" :                    n_epochs,
+            "max_steps" :                   max_steps,
+            "shared_params":                shared_params,
+            "episode_rewards" :             episode_rewards
+        }
+
+        self.save_data_to_file("{}/data_{}.json".format(save_dir, start_time_fname), data)
+
         plt.plot(episode_rewards)
+        plt.title("Reward over iterations")
+        plt.xlabel("Collection iterations")
+        plt.ylabel("Reward")
+        plt.savefig("{}/plot_{}".format(save_dir, start_time_fname))
         plt.show()
 
     # Save tensor of actions to json file
@@ -328,6 +367,10 @@ class TeamExplore():
 
         with open(fname, 'w') as fp:
             json.dump(dict_actions, fp)
+
+    def save_data_to_file(self, fname, data):
+        with open(fname, 'w') as fp:
+            json.dump(data, fp)
 
 
 
