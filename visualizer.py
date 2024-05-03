@@ -1,3 +1,4 @@
+import sys
 import json
 import pygame
 import random
@@ -374,6 +375,17 @@ class Visualizer():
             pygame.display.update()
             pygame.time.delay(250)
 
+        print("Episode reward: {}".format(action["next", "episode_reward"].item()))
+
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                    pygame.quit()
+                    return
+            
+            pygame.display.update()
+            pygame.time.delay(250)
 
 
     def map_test(self):
@@ -400,7 +412,7 @@ if __name__ == "__main__":
 
     # fname = "eval_20240429-130711_iter_0.json"
 
-    fname = "eval_20240501-122636_iter_46.json"
+    # fname = "eval_20240501-122636_iter_46.json"
     # fname = "eval_20240501-122624_iter_45.json"
 
     # fname = "eval_20240501-125055_iter_33.json"
@@ -408,7 +420,22 @@ if __name__ == "__main__":
     # fname = "eval_20240501-141132_iter_41.json"
     # fname = "eval_20240501-141216_iter_43.json"
 
-    fname = "eval_20240501-143507_iter_19.json"
+    # fname = "eval_20240501-143507_iter_19.json"
 
-    vis.vis_from_file_playback(fname)
+    # fname = "eval_20240502-131545_iter_30.json"
+    # fname = "eval_20240502-144646_iter_116.json"
+
+    # fname = "eval_20240502_155058_iter_86.json"
+
+    # vis.vis_from_file_playback(fname)
+
+    if len(sys.argv) > 1:
+        fname = sys.argv[1]
+        print("Playing file: {}".format(fname))
+        vis.vis_from_file_playback(fname)
+    else:
+        print("No filename given, playing test action")
+        vis.test_main()
+
+
             

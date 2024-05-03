@@ -610,13 +610,13 @@ class EnvEngine(EnvBase):
             case CellType.GRASS:
                 if CellType.GRASS in agent.abilities:
                     move_valid = True
-                    reward_mod = self.ability_tile_reward_mod
+                    # reward_mod = self.ability_tile_reward_mod
                 else:
                     reward_mod = self.negative_reward_mod
             case CellType.WATER:
                 if CellType.WATER in agent.abilities:
                     move_valid = True
-                    reward_mod = self.ability_tile_reward_mod
+                    # reward_mod = self.ability_tile_reward_mod
                 else:
                     reward_mod = self.negative_reward_mod
             case CellType.WALL:
@@ -747,16 +747,27 @@ class EnvEngine(EnvBase):
         y1 = min(self.cols, y + agent.rangeOfSight)
 
         # Get number of unknown cells in obs_map within agent's range of sight (this is the reward)
-        num_unknown = torch.sum((self.obs_map[x0:x1+1, y0:y1+1] == CellType.UNKNOWN))
+        reward = torch.sum((self.obs_map[x0:x1+1, y0:y1+1] == CellType.UNKNOWN))
 
         # Update obs_map with true cell values
         self.obs_map[x0:x1+1, y0:y1+1] = self.map[x0:x1+1, y0:y1+1]
+
+        # TODO: Maybe change this so instead of conditioning on new tiles being found, we keep track 
+        #       of where each agent has been and only give reward if it hasn't stepped on this tile yet
+        
+        # If moving into a special tile, only give reward if new tiles are being found
+        if self.map[x, y] == CellType.WATER:
+            if reward > 0:
+                reward += self.ability_tile_reward_mod
+        elif self.map[x, y] == CellType.GRASS:
+            if reward > 0:
+                reward += self.ability_tile_reward_mod
         
         # NOTE: Don't need to return agent specific observations here because we want to calculate
         #       all observations of all agents first, then create individual observations
         
         # Return num_unknown as reward
-        return num_unknown
+        return reward
 
     def calc_agent_observation(self, agent:Agent):
         # Calculate observation for a specific agent
