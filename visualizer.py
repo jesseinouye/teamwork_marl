@@ -26,6 +26,7 @@ BLUE = (0, 0, 255)
 PINK = (255, 0, 255)
 PURPLE = (150, 0, 200)
 ORANGE = (245, 146, 24)
+GRAY_ORANGE = (61, 55, 41)
 
 class Visualizer():
     def __init__(self) -> None:
@@ -46,14 +47,16 @@ class Visualizer():
             CellType.AGENT_1: RED,
             CellType.AGENT_2: PINK,
             CellType.AGENT_3: PURPLE,
-            CellType.AGENT_4: ORANGE
+            CellType.AGENT_4: ORANGE,
+            CellType.NULL: GRAY_ORANGE
             # Add other CellType mappings here
         }
 
         pygame.init()
 
-    def init_env(self, seed=None, fname=None):
-        self.env = EnvEngine(n_agents=2, agent_abilities=[[1, 3], [1, 4]], seed=seed, fname=fname)
+    def init_env(self, seed=None, fname=None, n_agents=2, agent_abilities=[[1, 3], [1, 4]]):
+        # self.env = EnvEngine(n_agents=2, agent_abilities=[[1, 3], [1, 4]], seed=seed, fname=fname)
+        self.env = EnvEngine(n_agents=n_agents, agent_abilities=agent_abilities, seed=seed, fname=fname)
         
         # Params
         self.rows = self.env.rows
@@ -233,6 +236,7 @@ class Visualizer():
         #     device=self.device
         # )
 
+        i = 0
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -240,19 +244,25 @@ class Visualizer():
                     pygame.quit()
                     return
 
-            # Perform step in env
-            self.env.step(actions)
+            # if i < 5:
+            if True:
+                # Perform step in env
+                self.env.step(actions)
 
-            # print("actions:\n{}".format(actions))
-            print("reward: {}".format(actions["next", "reward"][0]))
+                # print("actions:\n{}".format(actions))
+                print("reward: {}".format(actions["next", "reward"][0]))
 
-            # Get observation (map) from output of step
-            obs_map = actions["next", "agents", "observation"]
-            obs_map = obs_map[0,0].numpy()
+                # Get observation (map) from output of step
+                obs_map = actions["next", "agents", "observation"]
+                obs_map = obs_map[0,0].numpy()
 
-            # Get ground truth state (map) from output of step
-            map = actions["next", "state"]
-            map = map.numpy()
+                # obs_map = actions["next", "local_obs"]
+                # obs_map = obs_map.numpy()
+
+                # Get ground truth state (map) from output of step
+                map = actions["next", "state"]
+                map = map.numpy()
+                i += 1
 
             # Draw ground truth and observation maps
             self.draw_map_vis(screen, map)
@@ -323,7 +333,16 @@ class Visualizer():
 
         print("data: {}".format(data))
 
-        self.init_env(seed=data["seed"])
+        n_agents = 2
+        agent_abilities = [[1, 3], [1, 4]]
+
+        if "n_agents" in data:
+            n_agents = data["n_agents"]
+        if "agent_abilities" in data:
+            agent_abilities = data["agent_abilities"]
+
+
+        self.init_env(seed=data["seed"], n_agents=n_agents, agent_abilities=agent_abilities)
 
         running = True
 

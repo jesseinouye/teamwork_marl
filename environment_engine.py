@@ -1,8 +1,13 @@
+import time
 import sys
 import random
 import copy
 import torch
 import numpy as np
+
+import torch.nn.functional as nnf
+import torchvision.transforms.functional as tvf
+
 from typing import List, Optional
 from enum import Enum, IntEnum
 from collections import Counter
@@ -59,6 +64,9 @@ class EnvEngine(EnvBase):
         if seed is not None:
             self._set_seed(seed)
 
+        # NOTE: using cpu because env runs faster on cpu than cuda for some reason
+        device = "cpu"
+
         # Init super
         super().__init__(device=device, batch_size=[])
 
@@ -96,10 +104,10 @@ class EnvEngine(EnvBase):
         # self.obs_map = np.array(self.obs_map)
 
         # Create observation map
-        self.obs_map = torch.zeros_like(self.map, dtype=torch.float32)
+        self.obs_map = torch.zeros_like(self.map, dtype=torch.float32, device=self.device)
 
         # Create observation maps for each agent shape = (n_agents, rows, cols)
-        self.all_agent_obs = torch.zeros((self.n_agents, self.obs_map.shape[0], self.obs_map.shape[1]), dtype=torch.float32)
+        self.all_agent_obs = torch.zeros((self.n_agents, self.obs_map.shape[0], self.obs_map.shape[1]), dtype=torch.float32, device=self.device)
 
         # Put tensors on correct device
         self.map = self.map.to(self.device)
@@ -132,8 +140,22 @@ class EnvEngine(EnvBase):
 
         # Adjustable params
         self.ability_tile_reward_mod = 2
-        self.negative_reward_mod = 0
+        self.negative_reward_mod = -2
 
+        self.agent_id_to_cell_type = {
+            0 : CellType.AGENT_1,
+            1 : CellType.AGENT_2,
+            2 : CellType.AGENT_3,
+            3 : CellType.AGENT_4
+        }
+
+        self.move_action_mapping = {
+            Action.IDLE : None,
+            Action.NORTH : (-1, 0),
+            Action.EAST : (0, 1),
+            Action.SOUTH : (1, 0),
+            Action.WEST : (0, -1)
+        }
 
 
         # Make spec for action and observation
@@ -207,7 +229,8 @@ class EnvEngine(EnvBase):
         spec = CompositeSpec(
             {
                 "agents": CompositeSpec(
-                    {"observation": obs_spec, "action_mask": mask_spec, "non_normalized_obs": non_normalized_obs_spec},
+                    # {"observation": obs_spec, "action_mask": mask_spec, "non_normalized_obs": non_normalized_obs_spec},
+                    {"observation": obs_spec, "action_mask": mask_spec},
                     shape=torch.Size((self.n_agents,))
                 ),
                 "state": DiscreteTensorSpec(
@@ -218,17 +241,28 @@ class EnvEngine(EnvBase):
                     device=self.device
                 ),
                 "info": info_spec,
-                "non_normalized_state": DiscreteTensorSpec(
-                    n=len(CellType),
-                    # shape=torch.Size((self.n_agents, self.obs_size)),
-                    shape=torch.Size((self.rows, self.cols)),
-                    dtype=torch.float32,
+                # "non_normalized_state": DiscreteTensorSpec(
+                #     n=len(CellType),
+                #     # shape=torch.Size((self.n_agents, self.obs_size)),
+                #     shape=torch.Size((self.rows, self.cols)),
+                #     dtype=torch.float32,
+                #     device=self.device
+                # ),
+                "percent_explored" : UnboundedContinuousTensorSpec(
+                    shape=torch.Size((1,)),
                     device=self.device
                 ),
                 "episode_reward": UnboundedContinuousTensorSpec(
                     shape=torch.Size((1,)),
                     device=self.device
-                )
+                ),
+                # "local_obs" : DiscreteTensorSpec(
+                #     n=len(CellType),
+                #     # shape=torch.Size((self.n_agents, self.obs_size)),
+                #     shape=torch.Size((self.rows, self.cols)),
+                #     dtype=torch.float32,
+                #     device=self.device
+                # )
             }
         )
         return spec
@@ -252,6 +286,7 @@ class EnvEngine(EnvBase):
         #   - Calculate reward from observation and prev observed map?
         #   - Update observed map
         actions = tensordict["agents", "action"]
+        # time_step_start = time.time()
 
         # Get decoded movements from one-hot tensor
         acts = torch.argmax(actions, dim=1)
@@ -267,6 +302,9 @@ class EnvEngine(EnvBase):
             reward += self.move_agent(self.agents[i], Action(action.item()))
             # Calculate agent observation and accumulate reward from viewing new cells
             reward += self.test_calc_agent_observation(self.agents[i])
+        
+        # time_move_obs = time.time()
+        # print("move_obs - step_start = {}".format(time_move_obs-time_step_start))
 
         # Normalize reward between 0-1
         #   - Lowest reward possible is all agents attempting invalid move (negative_reward_mod * n_agents)
@@ -278,9 +316,14 @@ class EnvEngine(EnvBase):
         # Update individual agent observation maps with new full observation map and agent location
         for agent in self.agents:
             self.all_agent_obs[agent.id, :] = self.obs_map
-            self.all_agent_obs[agent.id, agent.position[0], agent.position[1]] = self.get_agent_cell_from_id(agent)
+            # local_obs = self.get_local_agent_obs_channel(agent)
+            # self.all_agent_obs[agent.id, agent.position[0], agent.position[1]] = self.get_agent_cell_from_id(agent)
+            self.all_agent_obs[agent.id, agent.position[0], agent.position[1]] = self.agent_id_to_cell_type[agent.id]
             # agent.observation[:] = self.obs_map
             # agent.observation[agent.position] = self.get_agent_cell_from_id(agent)
+
+        # time_obs_map = time.time()
+        # print("obs_map - move_obs = {}".format(time_obs_map - time_move_obs))
 
         # TODO: normalize observation between 0-1
         # # Normalize between 0-1 (divide by cell value of last agent, which is the highest possible cell value)
@@ -318,9 +361,10 @@ class EnvEngine(EnvBase):
         # TODO: Calculate if done via exploration
 
         # Count number of observed cells that are walkable
-        num_obs_walkable_cells = torch.sum((self.obs_map == CellType.FLOOR))
-        num_obs_walkable_cells += torch.sum((self.obs_map == CellType.WATER))
-        num_obs_walkable_cells += torch.sum((self.obs_map == CellType.GRASS))
+        num_obs_walkable_cells = torch.sum((self.obs_map == CellType.FLOOR) | (self.obs_map == CellType.WATER) | (self.obs_map == CellType.GRASS))
+        # num_obs_walkable_cells = torch.sum((self.obs_map == CellType.FLOOR))
+        # num_obs_walkable_cells += torch.sum((self.obs_map == CellType.WATER))
+        # num_obs_walkable_cells += torch.sum((self.obs_map == CellType.GRASS))
 
         # num_obs_walkable_cells = torch.sum(((self.obs_map == CellType.FLOOR) or (self.obs_map == CellType.WATER) or (self.obs_map == CellType.GRASS)))
 
@@ -330,11 +374,10 @@ class EnvEngine(EnvBase):
         # percent_explored = 1 - (num_unknown / self.map_area)
 
         # If explored map over a threshold, end episode
-        if percent_explored > 0.9:
+        if percent_explored > 0.99:
             print("Map explored - ending episode - episode reward: {}".format(self.episode_reward))
             ep_done = 1
-            # reward += 50
-
+            # reward += 20
 
         # If number of steps exceeds max steps, end episode
         if self.cur_step > self.max_steps:
@@ -344,10 +387,14 @@ class EnvEngine(EnvBase):
             # TODO: if whole map not explored, do negative reward
             #       negative reward = number of tiles left UNKNOWN ?
 
+        # time_done_calc = time.time()
+        # print("done_calc - obs_map = {}".format(time_done_calc-time_move_obs))
+
         reward = torch.tensor([reward], device=self.device, dtype=torch.float32)
 
         done = torch.tensor([ep_done], device=self.device, dtype=torch.bool)
 
+        percent_explored = torch.tensor([percent_explored], device=self.device, dtype=torch.float32)
 
 
         # TODO: fix these to output actual data
@@ -381,8 +428,10 @@ class EnvEngine(EnvBase):
                 "state": state,
                 "info": info,
                 "reward": reward,
+                "percent_explored" : percent_explored,
                 "episode_reward": episode_reward,
                 "done": done,
+                # "local_obs": local_obs,
                 "terminated": done.clone()
             },
             batch_size=(),
@@ -419,7 +468,9 @@ class EnvEngine(EnvBase):
         # Update individual agent observation maps with new full observation map
         for agent in self.agents:
             self.all_agent_obs[agent.id, :] = self.obs_map
-            self.all_agent_obs[agent.id, agent.position[0], agent.position[1]] = self.get_agent_cell_from_id(agent)
+            # local_obs = self.get_local_agent_obs_channel(agent)
+            # self.all_agent_obs[agent.id, agent.position[0], agent.position[1]] = self.get_agent_cell_from_id(agent)
+            self.all_agent_obs[agent.id, agent.position[0], agent.position[1]] = self.agent_id_to_cell_type[agent.id]
             
         obs = self.all_agent_obs
 
@@ -457,6 +508,8 @@ class EnvEngine(EnvBase):
 
         episode_reward = torch.tensor([self.episode_reward], device=self.device, dtype=torch.float32)
 
+        percent_explored = torch.tensor([0], device=self.device, dtype=torch.float32)
+
         agents_td = TensorDict(
             {"observation": obs, "action_mask": mask}, batch_size=(self.n_agents,)
         )
@@ -478,7 +531,9 @@ class EnvEngine(EnvBase):
                 "agents": agents_td,
                 "state": state,
                 "info": info,
-                "episode_reward": episode_reward
+                "episode_reward": episode_reward,
+                "percent_explored": percent_explored,
+                # "local_obs": local_obs,
                 # "reward": reward,
                 # "done": done,
                 # "terminated": done.clone()
@@ -542,7 +597,8 @@ class EnvEngine(EnvBase):
                 # if self.map[row, col].get_type() == CellType.FLOOR:
                 if self.map[row, col] == CellType.FLOOR:
                     self.agents[cur_agent].position = (row, col)
-                    self.state_map[row, col] = self.get_agent_cell_from_id(self.agents[cur_agent])
+                    # self.state_map[row, col] = self.get_agent_cell_from_id(self.agents[cur_agent])
+                    self.state_map[row, col] = self.agent_id_to_cell_type[self.agents[cur_agent].id]
                     # self.state_map[row, col].observe()
                     cur_agent += 1
                     if cur_agent >= len(self.agents):
@@ -554,21 +610,23 @@ class EnvEngine(EnvBase):
         move = None
         reward_mod = 0
 
-        if dir == Action.WEST:
-            move = (0, -1)
-        elif dir == Action.EAST:
-            move = (0, 1)
-        elif dir == Action.NORTH:
-            move = (-1, 0)
-        elif dir == Action.SOUTH:
-            move = (1, 0)
+        # if dir == Action.WEST:
+        #     move = (0, -1)
+        # elif dir == Action.EAST:
+        #     move = (0, 1)
+        # elif dir == Action.NORTH:
+        #     move = (-1, 0)
+        # elif dir == Action.SOUTH:
+        #     move = (1, 0)
+
+        move = self.move_action_mapping[dir]
 
         # ensure 'move' is not None before proceeding
         if move is not None:
             # print(agent.position, move)
             n_row, n_col = agent.position[0] + move[0], agent.position[1] + move[1]
             
-            move_valid, reward_mod = self.check_agent_ability(agent, dir, n_row, n_col)
+            move_valid, reward_mod = self.check_agent_ability(agent, n_row, n_col)
 
             # If agent is able to move to new cell
             # if self.check_agent_ability(agent, dir, n_row, n_col):
@@ -578,7 +636,8 @@ class EnvEngine(EnvBase):
                 # Update agent position to new location
                 agent.position = (n_row, n_col)
                 # Update state map with agent's new location
-                self.state_map[agent.position] = self.get_agent_cell_from_id(agent)
+                # self.state_map[agent.position] = self.get_agent_cell_from_id(agent)
+                self.state_map[agent.position] = self.agent_id_to_cell_type[agent.id]
                 # self.state_map[agent.position].observe()
         # else:
             # print(f"Invalid direction {dir}")
@@ -587,12 +646,12 @@ class EnvEngine(EnvBase):
 
 
     # Move agent in specified direction, if valid
-    def check_agent_ability(self, agent:Agent, dir, n_row, n_col):
+    def check_agent_ability(self, agent:Agent, n_row, n_col):
         move_valid = False
         reward_mod = 0
 
         # Check if position out of bounds
-        if n_row < 0 or n_row >= len(self.map) or n_col < 0 or n_col >= len(self.map[0]):
+        if n_row < 0 or n_row >= self.map.shape[0] or n_col < 0 or n_col >= self.map.shape[1]:
             move_valid = False
             reward_mod = self.negative_reward_mod
             return move_valid, reward_mod
@@ -737,6 +796,50 @@ class EnvEngine(EnvBase):
         # for agent in self.agents:
         #     pass
         pass
+
+    def get_local_agent_obs_channel(self, agent:Agent):
+        x, y = agent.position
+
+        x0 = max(0, x - agent.rangeOfSight)
+        x1 = min(self.rows, x + agent.rangeOfSight)
+        y0 = max(0, y - agent.rangeOfSight)
+        y1 = min(self.cols, y + agent.rangeOfSight)
+
+        xb0 = max(0, x - agent.rangeOfSight - 1)
+        xb1 = min(self.rows, x + agent.rangeOfSight + 1)
+        yb0 = max(0, y - agent.rangeOfSight - 1)
+        yb1 = min(self.cols, y + agent.rangeOfSight + 1)
+
+        broad_x0 = max(agent.rangeOfSight - x + 1, 0)
+        broad_x1 = min(self.rows - 1 - x, 8)
+        broad_y0 = max(agent.rangeOfSight - y + 1, 0)
+        broad_y1 = min(self.cols - 1 - y, 8)
+
+        broad_obs = torch.full((agent.rangeOfSight*2+3,agent.rangeOfSight*2+3), CellType.NULL)
+        print("shape: {}".format(broad_obs.shape))
+
+        # local_obs = self.state_map[x0:x1+1, y0:y1+1]
+        broad_obs[broad_x0:broad_x1+1, broad_y0:broad_y1+1] = self.obs_map[xb0:xb1+1, yb0:yb1+1]
+        broad_obs[agent.rangeOfSight+1, agent.rangeOfSight+1] = self.agent_id_to_cell_type[agent.id]
+        # print("broad_obs init: {}".format(broad_obs))
+        # broad_obs[x0:x1+1, y0:y1+1] = self.state_map[x0:x1+1, y0:y1+1]
+        broad_obs = torch.unsqueeze(broad_obs, 0)
+        broad_obs = torch.unsqueeze(broad_obs, 0)
+        print("broad_obs before interp:\n{}".format(broad_obs))
+        # broad_obs = tvf.resize(broad_obs, (22,22), interpolation=tvf.InterpolationMode.NEAREST_EXACT)
+        broad_obs = torch.nn.functional.interpolate(broad_obs, (22,22), mode="nearest-exact")
+        torch.set_printoptions(threshold=10_000)
+        broad_obs = torch.squeeze(broad_obs)
+        broad_obs = torch.squeeze(broad_obs)
+        full_broad_obs = torch.full((32,32), CellType.NULL)
+        full_broad_obs[5:27, 5:27] = broad_obs
+        print("broad_obs after interp:\n{}".format(full_broad_obs))
+        torch.set_printoptions(profile="default") # reset
+
+        return full_broad_obs
+
+
+        
 
     def test_calc_agent_observation(self, agent:Agent):
         x, y = agent.position
@@ -883,7 +986,7 @@ class EnvEngine(EnvBase):
         self.ensure_connectivity()
 
         # self.map = np.array(self.map)
-        self.map = torch.tensor(self.map, dtype=torch.float32)
+        self.map = torch.tensor(self.map, dtype=torch.float32, device=self.device)
 
         print("Map generation complete")
         return self.map

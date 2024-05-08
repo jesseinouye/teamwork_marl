@@ -13,6 +13,7 @@ class CellType(IntEnum):
     AGENT_2 = 7     # Agent 2 in this cell
     AGENT_3 = 8     # Agent 3 in this cell
     AGENT_4 = 9    # Agent 4 in this cell
+    NULL = 10
 
     def is_observable(self):
          # Cells that are considered observed if they are known types of terrain

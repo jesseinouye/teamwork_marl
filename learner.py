@@ -34,15 +34,16 @@ class TeamExplore():
 
         torch.manual_seed(seed)
 
-        self.device = "cpu" if not torch.cuda.device_count() else "cuda:0"
+        self.device = "cpu" if not torch.cuda.device_count() else "cuda"
+        # self.device = "cpu"
         print(f"Using device: {self.device}")
 
         self.build_envs()
 
     # Build train and test environments
     def build_envs(self):
-        self.env = EnvEngine(n_agents=self.n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=self.device, seed=self.seed, max_steps=512)
-        self.env_test = EnvEngine(n_agents=self.n_agents, agent_abilities=[[1, 3], [1, 4]], map_size=32, device=self.device, seed=self.seed, max_steps=512)
+        self.env = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=1000)
+        self.env_test = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=1000)
 
     # Build Q agent networks
     def build_q_agents(self):
@@ -92,8 +93,8 @@ class TeamExplore():
             action_space="one-hot"
         )
 
-        # qnet = SafeSequential(cnn_module, mlp_module, value_module)
-        qnet = SafeSequential(cnn_module, mlp_module, softmax, value_module)
+        qnet = SafeSequential(cnn_module, mlp_module, value_module)
+        # qnet = SafeSequential(cnn_module, mlp_module, softmax, value_module)
         return qnet
 
     # Build Q agent networks
@@ -131,7 +132,7 @@ class TeamExplore():
         mlp_module = TensorDictModule(mlp, in_keys=[("agents", "hidden")], out_keys=[("agents", "action_value")])
 
         # DistributionalDQNnet applies log softmax
-        softmax = DistributionalDQNnet(in_keys=[("agents", "action_value")], out_keys=[("agents", "action_value")])
+        # softmax = DistributionalDQNnet(in_keys=[("agents", "action_value")], out_keys=[("agents", "action_value")])
 
         value_module = QValueModule(
             action_value_key=("agents", "action_value"),
@@ -144,20 +145,37 @@ class TeamExplore():
             action_space="one-hot"
         )
 
-        # qnet = SafeSequential(cnn_module, mlp_module, value_module)
-        qnet = SafeSequential(cnn_module, mlp_module, softmax, value_module)
+        qnet = SafeSequential(cnn_module, mlp_module, value_module)
+        # qnet = SafeSequential(cnn_module, mlp_module, softmax, value_module)
         return qnet
 
     def train(self):
-        # NOTE: epsilon updates every collector run, decreases linearly by < new_eps = old eps - ((eps_start - eps_end) / (eps_steps / frames_per_collector_run)) >
-        # NOTE: learning rate optimizer steps every batch  < # steps total = ((frames_per_collector_run / batch_size) * n_epochs) * collector_runs >
+        # NOTE: epsilon updates every collector run, decreases linearly by : new_eps = old eps - ((eps_start - eps_end) / (eps_steps / frames_per_collector_run))
+        # NOTE: learning rate optimizer steps every batch : # steps total = ((frames_per_collector_run / batch_size) * n_epochs) * collector_runs
 
-        # Training params
-        collector_runs = 50         # TODO: is this naming correct? should probably be something like "collections"
-        frames_per_collector_run = 8192
-        total_frames = frames_per_collector_run * collector_runs   
-        memory_size = 100000         # TODO: increase this
-        batch_size = 512             # TODO: big powers of 2
+        # # Training params
+        # collector_runs = 200
+        # frames_per_collector_run = 8192
+        # total_frames = frames_per_collector_run * collector_runs   
+        # memory_size = 100000
+        # batch_size = 512
+        # eps_init = 1.0
+        # eps_end = 0.05
+        # eps_num_steps = 200000
+        # gamma = 0.99
+        # tau = 0.005
+        # lr = 5e-4
+        # max_grad_norm = 40
+        # n_epochs = 10
+        # max_steps = 300     # Steps run during eval
+
+
+        # Fast training params
+        collector_runs = 1
+        frames_per_collector_run = 1
+        total_frames = frames_per_collector_run * collector_runs
+        memory_size = 1000
+        batch_size = 1
         eps_init = 1.0
         eps_end = 0.05
         eps_num_steps = 50000
@@ -165,24 +183,10 @@ class TeamExplore():
         tau = 0.005
         lr = 5e-5
         max_grad_norm = 40
-        n_epochs = 10
-        max_steps = 256     # Steps run during eval
+        n_epochs = 1
+        max_steps = 1     # Steps run during eval
 
-
-        # # Fast training params
-        # collector_runs = 5         # TODO: is this naming correct? should probably be something like "collections"
-        # frames_per_collector_run = 128
-        # total_frames = frames_per_collector_run * collector_runs
-        # memory_size = 1000         # TODO: increase this
-        # batch_size = 16             # TODO: big powers of 2
-        # gamma = 0.99
-        # tau = 0.005
-        # lr = 5e-5
-        # max_grad_norm = 40
-        # n_epochs = 2
-        # max_steps = 32     # Steps run during eval
-
-        shared_params = True
+        shared_params = False
 
         if shared_params:
             self.qnet = self.build_q_agents_shared_params()
@@ -211,11 +215,14 @@ class TeamExplore():
             out_keys=["chosen_action_value"]
         )
 
+        # NOTE: using "cpu" as device here because env is optimized for cpu (I think)
         collector = SyncDataCollector(
             self.env,
             qnet_explore,
-            device=self.device,
-            storing_device=self.device,
+            device="cpu",
+            storing_device="cpu",
+            policy_device="cpu",
+            env_device="cpu",
             frames_per_batch=frames_per_collector_run,
             total_frames=total_frames
         )
@@ -241,14 +248,18 @@ class TeamExplore():
         optim = torch.optim.Adam(loss_module.parameters(), lr=lr)
 
         episode_rewards = []
+        episode_rewards_moving_avg = []
+        episode_percent_explored = []
 
-        total_frames = 0
-        sampling_start = time.time()
-        start_time = time.time()
+        best_eval_reward = 0
 
         start_time_fname = time.strftime("%Y%m%d_%H%M%S")
         save_dir = "data/{}/".format(start_time_fname)
         Path(save_dir).mkdir(parents=True, exist_ok=True)
+
+        total_frames = 0
+        sampling_start = time.time()
+        start_time = time.time()
 
         print("Enumerating collector")
         for i, tensordict_data in enumerate(collector):
@@ -301,16 +312,34 @@ class TeamExplore():
                 self.env_test.frames = []
                 rollouts = self.env_test.rollout(
                     max_steps=max_steps,
-                    policy=qnet_explore,
+                    policy=self.qnet,
                     auto_cast_to_device=True,
                     break_when_any_done=False
                 )
 
-                # print("rewards: {}".format(rollouts["next", "episode_reward"][-1].item()))
+                eval_reward = rollouts["next", "episode_reward"][-1].item()
+                eval_percent_explored = rollouts["next", "percent_explored"][-1].item() * 100
+                print("  eval reward: {}".format(eval_reward))
 
-                episode_rewards.append(rollouts["next", "episode_reward"][-1].item())
+                episode_rewards.append(eval_reward)
+                episode_percent_explored.append(eval_percent_explored)
+                
+                moving_avg_steps = 10
+                reward_tot = 0
+                for iter_reward in range(1, min(len(episode_rewards), moving_avg_steps)+1):
+                    reward_tot += episode_rewards[-iter_reward]
 
-                self.save_actions_to_file("{}/eval_{}_iter_{}.json".format(save_dir, start_time_fname, i), rollouts["agents", "action"], self.seed)
+                reward_avg = reward_tot / moving_avg_steps
+
+                episode_rewards_moving_avg.append(reward_avg)
+
+                self.save_actions_to_file("{}/eval_{}_iter_{}.json".format(save_dir, start_time_fname, i), rollouts["agents", "action"])
+
+                # TODO: change this to only save the state_dict?
+                # Save qnet model
+                if eval_reward > best_eval_reward:
+                    torch.save(self.qnet, "{}/qnet_pickle_{}.pkl".format(save_dir, start_time_fname))
+                    best_eval_reward = eval_reward
 
                 evaluation_time = time.time() - evaluation_start
 
@@ -318,7 +347,8 @@ class TeamExplore():
 
             sampling_start = time.time()
 
-        print("total_time: {}".format(time.time() - start_time))
+        total_time = time.time() - start_time
+        print("total_time: {}".format(total_time))
 
         # Visualize last eval rollout
         if 1:
@@ -345,25 +375,51 @@ class TeamExplore():
             "max_grad_norm" :               max_grad_norm,
             "n_epochs" :                    n_epochs,
             "max_steps" :                   max_steps,
-            "shared_params":                shared_params,
-            "episode_rewards" :             episode_rewards
+            "shared_params" :               shared_params,
+            "total_time" :                  total_time,
+            "episode_rewards" :             episode_rewards,
+            "episode_rewards_moving_avg" :  episode_rewards_moving_avg
         }
 
         self.save_data_to_file("{}/data_{}.json".format(save_dir, start_time_fname), data)
 
-        plt.plot(episode_rewards)
-        plt.title("Reward over iterations")
-        plt.xlabel("Collection iterations")
-        plt.ylabel("Reward")
+        fig, axs = plt.subplots(2, sharex=True, sharey=True, figsize=(10,8))
+        # Plot reward per eval iteration
+        ln1 = axs[0].plot(episode_rewards, label="Reward", color="blue")
+        axs[0].set_title("Reward over iterations")
+        axs[0].set_ylabel("Reward")
+        axs[0].tick_params(axis="y")
+        # Plot percent of map explored per eval iteration (on same plot as reward)
+        axs_01 = axs[0].twinx()
+        ln2 = axs_01.plot(episode_percent_explored, label="% explored", color="red")
+        axs_01.set_ylabel("% explored")
+        axs_01.tick_params(axis="y")
+        axs_01.set_ylim([0, 100])
+        # Plot average moving reward
+        axs[1].plot(episode_rewards_moving_avg, label="Avg Reward")
+        axs[1].set_title("Avg moving reward over {} iteration".format(moving_avg_steps))
+        
+        lns = ln1+ln2
+        labs = [l.get_label() for l in lns]
+        axs[0].legend(lns, labs)
+
+        for ax in axs.flat:
+            ax.set(xlabel='Iterations', ylabel='Reward')
+
+        # Hide x labels and tick labels for top plots and y ticks for right plots.
+        for ax in axs.flat:
+            ax.label_outer()
+
+        fig.tight_layout()
         plt.savefig("{}/plot_{}".format(save_dir, start_time_fname))
         plt.show()
 
     # Save tensor of actions to json file
-    def save_actions_to_file(self, fname, actions, seed):
+    def save_actions_to_file(self, fname, actions):
         # for step in actions:
         #     print("step: {}".format(step))
         list_actions = [step.tolist() for step in actions]
-        dict_actions = {"seed" : seed, "actions" : list_actions}
+        dict_actions = {"seed" : self.seed, "n_agents" : self.n_agents, "agent_abilities" : self.agent_abilities, "actions" : list_actions}
 
         with open(fname, 'w') as fp:
             json.dump(dict_actions, fp)
@@ -377,4 +433,8 @@ class TeamExplore():
 
 if __name__ == "__main__":
     te = TeamExplore()
+
+    # Single agent
+    # te = TeamExplore(n_agents=1, agent_abilities=[[1, 3, 4]])
+
     te.train()
