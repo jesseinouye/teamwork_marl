@@ -108,6 +108,7 @@ class EnvEngine(EnvBase):
 
         # Create observation maps for each agent shape = (n_agents, rows, cols)
         self.all_agent_obs = torch.zeros((self.n_agents, self.obs_map.shape[0], self.obs_map.shape[1]), dtype=torch.float32, device=self.device)
+        # self.all_agent_obs = torch.zeros((self.n_agents, 2, self.obs_map.shape[0], self.obs_map.shape[1]), dtype=torch.float32, device=self.device)
 
         # Put tensors on correct device
         self.map = self.map.to(self.device)
@@ -199,7 +200,7 @@ class EnvEngine(EnvBase):
         obs_spec = DiscreteTensorSpec(
             n=len(CellType),
             # shape=torch.Size((self.n_agents, self.obs_size)),
-            shape=torch.Size((self.n_agents, self.rows, self.cols)),
+            shape=torch.Size((self.n_agents, 2, self.rows, self.cols)),
             dtype=torch.float32,
             device=self.device
         )
@@ -316,11 +317,25 @@ class EnvEngine(EnvBase):
         # Update individual agent observation maps with new full observation map and agent location
         for agent in self.agents:
             self.all_agent_obs[agent.id, :] = self.obs_map
-            # local_obs = self.get_local_agent_obs_channel(agent)
-            # self.all_agent_obs[agent.id, agent.position[0], agent.position[1]] = self.get_agent_cell_from_id(agent)
             self.all_agent_obs[agent.id, agent.position[0], agent.position[1]] = self.agent_id_to_cell_type[agent.id]
-            # agent.observation[:] = self.obs_map
-            # agent.observation[agent.position] = self.get_agent_cell_from_id(agent)
+
+            x, y = agent.position
+
+            x0 = max(0, x - agent.rangeOfSight)
+            x1 = min(self.rows, x + agent.rangeOfSight)
+            y0 = max(0, y - agent.rangeOfSight)
+            y1 = min(self.cols, y + agent.rangeOfSight)
+
+            for other_agent in self.agents:
+                if agent.id == other_agent.id:
+                    continue
+                if ((other_agent.position[0] >= x0) and (other_agent.position[0] <= x1)) and ((other_agent.position[1] >= y0) and (other_agent.position[1] <= y1)):
+                    self.all_agent_obs[agent.id, other_agent.position[0], other_agent.position[1]] = self.agent_id_to_cell_type[other_agent.id]
+
+            # self.all_agent_obs[agent.id, 0, :] = self.obs_map
+            # self.all_agent_obs[agent.id, 0, agent.position[0], agent.position[1]] = self.agent_id_to_cell_type[agent.id]
+            # local_obs = self.get_local_agent_obs_channel(agent)
+            # self.all_agent_obs[agent.id, 1, :] = local_obs
 
         # time_obs_map = time.time()
         # print("obs_map - move_obs = {}".format(time_obs_map - time_move_obs))
@@ -380,7 +395,7 @@ class EnvEngine(EnvBase):
             # reward += 20
 
         # If number of steps exceeds max steps, end episode
-        if self.cur_step > self.max_steps:
+        if self.cur_step >= self.max_steps:
             print("Steps exceeded - ending episode - episode reward: {}".format(self.episode_reward))
             ep_done = 1
             # reward -= 100
@@ -448,7 +463,7 @@ class EnvEngine(EnvBase):
         # Move all agents to start (upper left corner)
         # print("resetting!!")
 
-        self.cur_step = 0
+        self.cur_step = 1
         self.episode_reward = 0
 
         # Clear observed and state maps
@@ -468,9 +483,11 @@ class EnvEngine(EnvBase):
         # Update individual agent observation maps with new full observation map
         for agent in self.agents:
             self.all_agent_obs[agent.id, :] = self.obs_map
-            # local_obs = self.get_local_agent_obs_channel(agent)
-            # self.all_agent_obs[agent.id, agent.position[0], agent.position[1]] = self.get_agent_cell_from_id(agent)
             self.all_agent_obs[agent.id, agent.position[0], agent.position[1]] = self.agent_id_to_cell_type[agent.id]
+            # self.all_agent_obs[agent.id, 0, :] = self.obs_map
+            # self.all_agent_obs[agent.id, 0, agent.position[0], agent.position[1]] = self.agent_id_to_cell_type[agent.id]
+            # local_obs = self.get_local_agent_obs_channel(agent)
+            # self.all_agent_obs[agent.id, 1, :] = local_obs
             
         obs = self.all_agent_obs
 
@@ -660,6 +677,7 @@ class EnvEngine(EnvBase):
         for check_agent in self.agents:
             if check_agent.position == (n_row, n_col):
                 move_valid = False
+                reward_mod = self.negative_reward_mod
                 return move_valid, reward_mod
 
         # Check type of cell the agent is attempting to move to
@@ -811,21 +829,21 @@ class EnvEngine(EnvBase):
         yb1 = min(self.cols, y + agent.rangeOfSight + 1)
 
         broad_x0 = max(agent.rangeOfSight - x + 1, 0)
-        broad_x1 = min(self.rows - 1 - x, 8)
+        broad_x1 = agent.rangeOfSight + 1 + min(self.rows - 1 - x, 4)
         broad_y0 = max(agent.rangeOfSight - y + 1, 0)
-        broad_y1 = min(self.cols - 1 - y, 8)
+        broad_y1 = agent.rangeOfSight + 1 + min(self.cols - 1 - y, 4)
 
-        broad_obs = torch.full((agent.rangeOfSight*2+3,agent.rangeOfSight*2+3), CellType.NULL)
-        print("shape: {}".format(broad_obs.shape))
+        broad_obs = torch.full((agent.rangeOfSight*2+3,agent.rangeOfSight*2+3), CellType.NULL, dtype=torch.float32)
 
         # local_obs = self.state_map[x0:x1+1, y0:y1+1]
+        # print("broad_x0: {} / broad_x1: {} / broad_y0: {} / broad_y1: {} / xb0: {} / xb1: {} / yb0: {} / yb1: {}".format(broad_x0, broad_x1, broad_y0, broad_y1, xb0, xb1, yb0, yb1))
         broad_obs[broad_x0:broad_x1+1, broad_y0:broad_y1+1] = self.obs_map[xb0:xb1+1, yb0:yb1+1]
         broad_obs[agent.rangeOfSight+1, agent.rangeOfSight+1] = self.agent_id_to_cell_type[agent.id]
         # print("broad_obs init: {}".format(broad_obs))
         # broad_obs[x0:x1+1, y0:y1+1] = self.state_map[x0:x1+1, y0:y1+1]
         broad_obs = torch.unsqueeze(broad_obs, 0)
         broad_obs = torch.unsqueeze(broad_obs, 0)
-        print("broad_obs before interp:\n{}".format(broad_obs))
+        # print("broad_obs before interp:\n{}".format(broad_obs))
         # broad_obs = tvf.resize(broad_obs, (22,22), interpolation=tvf.InterpolationMode.NEAREST_EXACT)
         broad_obs = torch.nn.functional.interpolate(broad_obs, (22,22), mode="nearest-exact")
         torch.set_printoptions(threshold=10_000)
@@ -833,7 +851,7 @@ class EnvEngine(EnvBase):
         broad_obs = torch.squeeze(broad_obs)
         full_broad_obs = torch.full((32,32), CellType.NULL)
         full_broad_obs[5:27, 5:27] = broad_obs
-        print("broad_obs after interp:\n{}".format(full_broad_obs))
+        # print("broad_obs after interp:\n{}".format(full_broad_obs))
         torch.set_printoptions(profile="default") # reset
 
         return full_broad_obs
@@ -974,6 +992,7 @@ class EnvEngine(EnvBase):
 
         # Create observation maps for each agent shape = (n_agents, rows, cols)
         self.all_agent_obs = torch.zeros((self.n_agents, self.obs_map.shape[0], self.obs_map.shape[1]), dtype=torch.float32)
+        # self.all_agent_obs = torch.zeros((self.n_agents, 2, self.obs_map.shape[0], self.obs_map.shape[1]), dtype=torch.float32)
 
 
     def generate_map(self):

@@ -217,7 +217,7 @@ class Visualizer():
         # Test actions w/ 2 agents - agent 1 down, agent 2 left
         actions = TensorDict(
             {"agents": TensorDict(
-                {"action": torch.tensor([[0, 0, 0, 1, 0], [0, 0, 1, 0, 0]])},
+                {"action": torch.tensor([[1, 0, 0, 0, 0], [0, 0, 0, 1, 0]])},
                 batch_size=(),
                 device=self.device)
             },
@@ -244,8 +244,8 @@ class Visualizer():
                     pygame.quit()
                     return
 
-            # if i < 5:
-            if True:
+            if i < 50:
+            # if True:
                 # Perform step in env
                 self.env.step(actions)
 
@@ -254,7 +254,7 @@ class Visualizer():
 
                 # Get observation (map) from output of step
                 obs_map = actions["next", "agents", "observation"]
-                obs_map = obs_map[0,0].numpy()
+                obs_map = obs_map[1,1].numpy()
 
                 # obs_map = actions["next", "local_obs"]
                 # obs_map = obs_map.numpy()
@@ -392,7 +392,7 @@ class Visualizer():
             # Update pygame display
             # Adding a small delay can make the agent's movement easier to observe
             pygame.display.update()
-            pygame.time.delay(250)
+            pygame.time.delay(100)
 
         print("Episode reward: {}".format(action["next", "episode_reward"].item()))
 
