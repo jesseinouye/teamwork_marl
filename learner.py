@@ -1,3 +1,4 @@
+import copy
 import json
 import time
 import torch
@@ -5,6 +6,8 @@ import torch
 import matplotlib.pyplot as plt
 
 from pathlib import Path
+
+from torchrl.data.tensor_specs import TensorSpec
 
 from environment_engine import EnvEngine
 from visualizer import Visualizer
@@ -22,6 +25,31 @@ from torchrl.modules import EGreedyModule, QValueModule, SafeSequential, Distrib
 from torchrl.modules.models.multiagent import MultiAgentMLP, QMixer, MultiAgentConvNet
 from torchrl.objectives import SoftUpdate, ValueEstimators
 from torchrl.objectives.multiagent.qmixer import QMixerLoss
+
+
+class CustomEGreedyModule(EGreedyModule):
+    def __init__(self, spec: TensorSpec, eps_init: float = 1, eps_end: float = 0.1, annealing_num_steps: int = 1000, *, action_key: str | torch.Tuple[str] | None = "action", action_mask_key: str | torch.Tuple[str] | None = None):
+        super().__init__(spec, eps_init, eps_end, annealing_num_steps, action_key=action_key, action_mask_key=action_mask_key)
+
+    def step(self, frames: int = 1) -> None:
+        """A step of epsilon decay.
+
+        After `self.annealing_num_steps` calls to this method, calls result in no-op.
+
+        Args:
+            frames (int, optional): number of frames since last step. Defaults to ``1``.
+
+        """
+        if self.eps == self.eps_end:
+            self.eps.data[0] = self.eps_init.item()
+        else:
+            for _ in range(frames):
+                self.eps.data[0] = max(
+                    self.eps_end.item(),
+                    (
+                        self.eps - (self.eps_init - self.eps_end) / self.annealing_num_steps
+                    ).item(),
+                )
 
 
 
@@ -42,8 +70,8 @@ class TeamExplore():
 
     # Build train and test environments
     def build_envs(self):
-        self.env = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=1000)
-        self.env_test = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=1000)
+        self.env = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=200)
+        self.env_test = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=200)
 
     # Build Q agent networks
     def build_q_agents(self):
@@ -55,7 +83,7 @@ class TeamExplore():
             centralised=False,
             share_params=False,
             in_features=1,
-            kernel_sizes=[5, 3, 3],
+            kernel_sizes=[3, 3, 3],
             num_cells=[32, 64, 64],
             strides=[2, 2, 1],
             paddings=[1, 1, 1],
@@ -153,15 +181,31 @@ class TeamExplore():
         # NOTE: epsilon updates every collector run, decreases linearly by : new_eps = old eps - ((eps_start - eps_end) / (eps_steps / frames_per_collector_run))
         # NOTE: learning rate optimizer steps every batch : # steps total = ((frames_per_collector_run / batch_size) * n_epochs) * collector_runs
 
-        # # Training params
-        # collector_runs = 200
-        # frames_per_collector_run = 8192
+        # Main training params
+        collector_runs = 120
+        frames_per_collector_run = 20000
+        total_frames = frames_per_collector_run * collector_runs   
+        memory_size = 40000
+        batch_size = 512
+        eps_init = 1.0
+        eps_end = 0.05
+        eps_num_steps = 100000
+        gamma = 0.99
+        tau = 0.005
+        lr = 5e-4
+        max_grad_norm = 40
+        n_epochs = 10
+        max_steps = 200     # Steps run during eval
+
+        # # Test training params
+        # collector_runs = 3000
+        # frames_per_collector_run = 2048
         # total_frames = frames_per_collector_run * collector_runs   
         # memory_size = 100000
         # batch_size = 512
         # eps_init = 1.0
         # eps_end = 0.05
-        # eps_num_steps = 200000
+        # eps_num_steps = 100000
         # gamma = 0.99
         # tau = 0.005
         # lr = 5e-4
@@ -170,21 +214,21 @@ class TeamExplore():
         # max_steps = 300     # Steps run during eval
 
 
-        # Fast training params
-        collector_runs = 1
-        frames_per_collector_run = 1
-        total_frames = frames_per_collector_run * collector_runs
-        memory_size = 1000
-        batch_size = 1
-        eps_init = 1.0
-        eps_end = 0.05
-        eps_num_steps = 50000
-        gamma = 0.99
-        tau = 0.005
-        lr = 5e-5
-        max_grad_norm = 40
-        n_epochs = 1
-        max_steps = 1     # Steps run during eval
+        # # Fast training params
+        # collector_runs = 10
+        # frames_per_collector_run = 2
+        # total_frames = frames_per_collector_run * collector_runs
+        # memory_size = 1000
+        # batch_size = 1
+        # eps_init = 1.0
+        # eps_end = 0.05
+        # eps_num_steps = 10
+        # gamma = 0.99
+        # tau = 0.005
+        # lr = 5e-5
+        # max_grad_norm = 40
+        # n_epochs = 1
+        # max_steps = 10     # Steps run during eval
 
         shared_params = False
 
@@ -203,6 +247,17 @@ class TeamExplore():
                 spec=self.env.action_spec
             )
         )
+
+        # qnet_explore = TensorDictSequential(
+        #     self.qnet,
+        #     CustomEGreedyModule(
+        #         eps_init=eps_init,
+        #         eps_end=eps_end,
+        #         annealing_num_steps=eps_num_steps,
+        #         action_key=("agents", "action"),
+        #         spec=self.env.action_spec
+        #     )
+        # )
 
         mixer = TensorDictModule(
             module=QMixer(
@@ -250,6 +305,7 @@ class TeamExplore():
         episode_rewards = []
         episode_rewards_moving_avg = []
         episode_percent_explored = []
+        episode_percent_explored_moving_avg = []
 
         best_eval_reward = 0
 
@@ -298,6 +354,7 @@ class TeamExplore():
 
             qnet_explore[1].step(frames=current_frames)
             collector.update_policy_weights_()
+            print("  new eps: {}".format(qnet_explore[1].eps))
 
             training_time = time.time() - training_start
             print("  training_time: {}".format(training_time))
@@ -326,12 +383,19 @@ class TeamExplore():
                 
                 moving_avg_steps = 10
                 reward_tot = 0
+                percent_tot = 0
+                moving_div = 0
+
                 for iter_reward in range(1, min(len(episode_rewards), moving_avg_steps)+1):
                     reward_tot += episode_rewards[-iter_reward]
+                    percent_tot += episode_percent_explored[-iter_reward]
+                    moving_div += 1
 
-                reward_avg = reward_tot / moving_avg_steps
+                reward_avg = reward_tot / moving_div
+                percent_avg = percent_tot / moving_div
 
                 episode_rewards_moving_avg.append(reward_avg)
+                episode_percent_explored_moving_avg.append(percent_avg)
 
                 self.save_actions_to_file("{}/eval_{}_iter_{}.json".format(save_dir, start_time_fname, i), rollouts["agents", "action"])
 
@@ -378,7 +442,8 @@ class TeamExplore():
             "shared_params" :               shared_params,
             "total_time" :                  total_time,
             "episode_rewards" :             episode_rewards,
-            "episode_rewards_moving_avg" :  episode_rewards_moving_avg
+            "episode_rewards_moving_avg" :  episode_rewards_moving_avg,
+            "episode_percent_explored" :    episode_percent_explored
         }
 
         self.save_data_to_file("{}/data_{}.json".format(save_dir, start_time_fname), data)
@@ -396,12 +461,23 @@ class TeamExplore():
         axs_01.tick_params(axis="y")
         axs_01.set_ylim([0, 100])
         # Plot average moving reward
-        axs[1].plot(episode_rewards_moving_avg, label="Avg Reward")
+        ln3 = axs[1].plot(episode_rewards_moving_avg, label="Avg Reward", color="blue")
         axs[1].set_title("Avg moving reward over {} iteration".format(moving_avg_steps))
+        axs[1].set_ylabel("Reward")
+        axs[1].tick_params(axis="y")
+        # Plot average moving percent of map explored
+        axs_02 = axs[1].twinx()
+        ln4 = axs_02.plot(episode_percent_explored_moving_avg, label="Avg % explored", color="red")
+        axs_02.set_ylabel("% explored")
+        axs_02.tick_params(axis="y")
+        axs_02.set_ylim([0, 100])
         
-        lns = ln1+ln2
-        labs = [l.get_label() for l in lns]
-        axs[0].legend(lns, labs)
+        lns1 = ln1+ln2
+        labs1 = [l.get_label() for l in lns1]
+        lns2 = ln3+ln4
+        labs2 = [l.get_label() for l in lns1]
+        axs[0].legend(lns1, labs1)
+        axs[1].legend(lns2, labs2)
 
         for ax in axs.flat:
             ax.set(xlabel='Iterations', ylabel='Reward')
