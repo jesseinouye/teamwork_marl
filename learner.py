@@ -70,8 +70,8 @@ class TeamExplore():
 
     # Build train and test environments
     def build_envs(self):
-        self.env = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=200)
-        self.env_test = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=200)
+        self.env = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=1024)
+        self.env_test = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=1024)
 
     # Build Q agent networks
     def build_q_agents(self):
@@ -83,7 +83,7 @@ class TeamExplore():
             centralised=False,
             share_params=False,
             in_features=1,
-            kernel_sizes=[3, 3, 3],
+            kernel_sizes=[5, 3, 3],
             num_cells=[32, 64, 64],
             strides=[2, 2, 1],
             paddings=[1, 1, 1],
@@ -181,21 +181,21 @@ class TeamExplore():
         # NOTE: epsilon updates every collector run, decreases linearly by : new_eps = old eps - ((eps_start - eps_end) / (eps_steps / frames_per_collector_run))
         # NOTE: learning rate optimizer steps every batch : # steps total = ((frames_per_collector_run / batch_size) * n_epochs) * collector_runs
 
-        # Main training params
-        collector_runs = 120
-        frames_per_collector_run = 20000
-        total_frames = frames_per_collector_run * collector_runs   
-        memory_size = 40000
-        batch_size = 512
-        eps_init = 1.0
-        eps_end = 0.05
-        eps_num_steps = 100000
-        gamma = 0.99
-        tau = 0.005
-        lr = 5e-4
-        max_grad_norm = 40
-        n_epochs = 10
-        max_steps = 200     # Steps run during eval
+        # # Main training params
+        # collector_runs = 300
+        # frames_per_collector_run = 8192
+        # total_frames = frames_per_collector_run * collector_runs   
+        # memory_size = 100000
+        # batch_size = 512
+        # eps_init = 1.0
+        # eps_end = 0.05
+        # eps_num_steps = 100000
+        # gamma = 0.99
+        # tau = 0.005
+        # lr = 5e-5
+        # max_grad_norm = 30
+        # n_epochs = 5
+        # max_steps = 300     # Steps run during eval
 
         # # Test training params
         # collector_runs = 3000
@@ -214,21 +214,21 @@ class TeamExplore():
         # max_steps = 300     # Steps run during eval
 
 
-        # # Fast training params
-        # collector_runs = 10
-        # frames_per_collector_run = 2
-        # total_frames = frames_per_collector_run * collector_runs
-        # memory_size = 1000
-        # batch_size = 1
-        # eps_init = 1.0
-        # eps_end = 0.05
-        # eps_num_steps = 10
-        # gamma = 0.99
-        # tau = 0.005
-        # lr = 5e-5
-        # max_grad_norm = 40
-        # n_epochs = 1
-        # max_steps = 10     # Steps run during eval
+        # Fast training params
+        collector_runs = 1
+        frames_per_collector_run = 1
+        total_frames = frames_per_collector_run * collector_runs
+        memory_size = 1000
+        batch_size = 1
+        eps_init = 1.0
+        eps_end = 0.05
+        eps_num_steps = 10
+        gamma = 0.99
+        tau = 0.005
+        lr = 5e-5
+        max_grad_norm = 40
+        n_epochs = 1
+        max_steps = 1     # Steps run during eval
 
         shared_params = False
 
@@ -508,9 +508,9 @@ class TeamExplore():
 
 
 if __name__ == "__main__":
-    te = TeamExplore()
+    # te = TeamExplore()
 
     # Single agent
-    # te = TeamExplore(n_agents=1, agent_abilities=[[1, 3, 4]])
+    te = TeamExplore(n_agents=1, agent_abilities=[[1, 3, 4]])
 
     te.train()

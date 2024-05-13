@@ -205,9 +205,10 @@ class Visualizer():
         pygame.display.set_caption("SLAM Visualizer")
         screen.fill(WHITE)
 
-        self.init_env(seed=0)
+        # self.init_env(seed=0)
         # self.init_env(seed=0, fname="simple_map.csv")
         # self.init_env(seed=0, fname="test_map.csv")
+        self.init_env(seed=0, n_agents=1, agent_abilities=[[1,3,4]])
 
         running = True
 
@@ -236,6 +237,17 @@ class Visualizer():
         #     device=self.device
         # )
 
+        # Test actions w/ 1 agent
+        actions = TensorDict(
+            {"agents": TensorDict(
+                {"action": torch.tensor([[0, 0, 1, 0, 0]])},
+                batch_size=(),
+                device=self.device)
+            },
+            batch_size=(),
+            device=self.device
+        )
+
         i = 0
         while running:
             for event in pygame.event.get():
@@ -246,6 +258,16 @@ class Visualizer():
 
             if i < 50:
             # if True:
+                if i > 2:
+                    actions = TensorDict(
+                        {"agents": TensorDict(
+                            {"action": torch.tensor([[0, 0, 0, 1, 0]])},
+                            batch_size=(),
+                            device=self.device)
+                        },
+                        batch_size=(),
+                        device=self.device
+                    )
                 # Perform step in env
                 self.env.step(actions)
 
@@ -254,7 +276,7 @@ class Visualizer():
 
                 # Get observation (map) from output of step
                 obs_map = actions["next", "agents", "observation"]
-                obs_map = obs_map[1,1].numpy()
+                obs_map = obs_map[0,0].numpy()
 
                 # obs_map = actions["next", "local_obs"]
                 # obs_map = obs_map.numpy()
@@ -262,6 +284,7 @@ class Visualizer():
                 # Get ground truth state (map) from output of step
                 map = actions["next", "state"]
                 map = map.numpy()
+
                 i += 1
 
             # Draw ground truth and observation maps
@@ -271,7 +294,7 @@ class Visualizer():
             # Update pygame display
             # Adding a small delay can make the agent's movement easier to observe
             pygame.display.update()
-            pygame.time.delay(500)
+            pygame.time.delay(100)
 
 
 

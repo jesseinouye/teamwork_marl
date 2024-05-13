@@ -200,7 +200,8 @@ class EnvEngine(EnvBase):
         obs_spec = DiscreteTensorSpec(
             n=len(CellType),
             # shape=torch.Size((self.n_agents, self.obs_size)),
-            shape=torch.Size((self.n_agents, 2, self.rows, self.cols)),
+            shape=torch.Size((self.n_agents, self.rows, self.cols)),
+            # shape=torch.Size((self.n_agents, 2, self.rows, self.cols)),
             dtype=torch.float32,
             device=self.device
         )
