@@ -64,9 +64,6 @@ class EnvEngine(EnvBase):
         if seed is not None:
             self._set_seed(seed)
 
-        # NOTE: using cpu because env runs faster on cpu than cuda for some reason
-        device = "cpu"
-
         # Init super
         super().__init__(device=device, batch_size=[])
 
