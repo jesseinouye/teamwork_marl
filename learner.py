@@ -70,8 +70,8 @@ class TeamExplore():
 
     # Build train and test environments
     def build_envs(self):
-        self.env = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=1024)
-        self.env_test = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=1024)
+        self.env = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=512)
+        self.env_test = EnvEngine(n_agents=self.n_agents, agent_abilities=self.agent_abilities, map_size=32, device=self.device, seed=self.seed, max_steps=512)
 
     # Build Q agent networks
     def build_q_agents(self):
@@ -181,21 +181,21 @@ class TeamExplore():
         # NOTE: epsilon updates every collector run, decreases linearly by : new_eps = old eps - ((eps_start - eps_end) / (eps_steps / frames_per_collector_run))
         # NOTE: learning rate optimizer steps every batch : # steps total = ((frames_per_collector_run / batch_size) * n_epochs) * collector_runs
 
-        # # Main training params
-        # collector_runs = 300
-        # frames_per_collector_run = 8192
-        # total_frames = frames_per_collector_run * collector_runs   
-        # memory_size = 100000
-        # batch_size = 512
-        # eps_init = 1.0
-        # eps_end = 0.05
-        # eps_num_steps = 100000
-        # gamma = 0.99
-        # tau = 0.005
-        # lr = 5e-5
-        # max_grad_norm = 30
-        # n_epochs = 5
-        # max_steps = 300     # Steps run during eval
+        # Main training params
+        collector_runs = 300
+        frames_per_collector_run = 8192
+        total_frames = frames_per_collector_run * collector_runs   
+        memory_size = 100000
+        batch_size = 512
+        eps_init = 1.0
+        eps_end = 0.05
+        eps_num_steps = 100000
+        gamma = 0.99
+        tau = 0.005
+        lr = 5e-5
+        max_grad_norm = 30
+        n_epochs = 5
+        max_steps = 300     # Steps run during eval
 
         # # Test training params
         # collector_runs = 3000
@@ -214,23 +214,23 @@ class TeamExplore():
         # max_steps = 300     # Steps run during eval
 
 
-        # Fast training params
-        collector_runs = 1
-        frames_per_collector_run = 1
-        total_frames = frames_per_collector_run * collector_runs
-        memory_size = 1000
-        batch_size = 1
-        eps_init = 1.0
-        eps_end = 0.05
-        eps_num_steps = 10
-        gamma = 0.99
-        tau = 0.005
-        lr = 5e-5
-        max_grad_norm = 40
-        n_epochs = 1
-        max_steps = 1     # Steps run during eval
+        # # Fast training params
+        # collector_runs = 1
+        # frames_per_collector_run = 1
+        # total_frames = frames_per_collector_run * collector_runs
+        # memory_size = 1000
+        # batch_size = 1
+        # eps_init = 1.0
+        # eps_end = 0.05
+        # eps_num_steps = 10
+        # gamma = 0.99
+        # tau = 0.005
+        # lr = 5e-5
+        # max_grad_norm = 40
+        # n_epochs = 1
+        # max_steps = 1     # Steps run during eval
 
-        shared_params = False
+        shared_params = True
 
         if shared_params:
             self.qnet = self.build_q_agents_shared_params()
@@ -270,14 +270,25 @@ class TeamExplore():
             out_keys=["chosen_action_value"]
         )
 
-        # NOTE: using "cpu" as device here because env is optimized for cpu (I think)
+        # NOTE: DO NOT USE using cpu seemed to break training
+        # collector = SyncDataCollector(
+        #     self.env,
+        #     qnet_explore,
+        #     device="cpu",
+        #     storing_device="cpu",
+        #     policy_device="cpu",
+        #     env_device="cpu",
+        #     frames_per_batch=frames_per_collector_run,
+        #     total_frames=total_frames
+        # )
+
         collector = SyncDataCollector(
             self.env,
             qnet_explore,
-            device="cpu",
-            storing_device="cpu",
-            policy_device="cpu",
-            env_device="cpu",
+            device=self.device,
+            storing_device=self.device,
+            policy_device=self.device,
+            env_device=self.device,
             frames_per_batch=frames_per_collector_run,
             total_frames=total_frames
         )
@@ -422,28 +433,29 @@ class TeamExplore():
             vis.visualize_action_set(self.env_test, rollouts["agents", "action"])
 
         data = {
-            "n_agents" :                    self.n_agents,
-            "agent_abilities" :             self.agent_abilities,
-            "seed" :                        self.seed,
-            "collector_runs" :              collector_runs,
-            "frames_per_collector_run" :    frames_per_collector_run,
-            "total_frames" :                total_frames,
-            "memory_size" :                 memory_size,
-            "batch_size" :                  batch_size,
-            "eps_init" :                    eps_init,
-            "eps_end" :                     eps_end,
-            "eps_num_steps" :               eps_num_steps,
-            "gamma" :                       gamma,
-            "tau" :                         tau,
-            "lr" :                          lr,
-            "max_grad_norm" :               max_grad_norm,
-            "n_epochs" :                    n_epochs,
-            "max_steps" :                   max_steps,
-            "shared_params" :               shared_params,
-            "total_time" :                  total_time,
-            "episode_rewards" :             episode_rewards,
-            "episode_rewards_moving_avg" :  episode_rewards_moving_avg,
-            "episode_percent_explored" :    episode_percent_explored
+            "n_agents" :                            self.n_agents,
+            "agent_abilities" :                     self.agent_abilities,
+            "seed" :                                self.seed,
+            "collector_runs" :                      collector_runs,
+            "frames_per_collector_run" :            frames_per_collector_run,
+            "total_frames" :                        total_frames,
+            "memory_size" :                         memory_size,
+            "batch_size" :                          batch_size,
+            "eps_init" :                            eps_init,
+            "eps_end" :                             eps_end,
+            "eps_num_steps" :                       eps_num_steps,
+            "gamma" :                               gamma,
+            "tau" :                                 tau,
+            "lr" :                                  lr,
+            "max_grad_norm" :                       max_grad_norm,
+            "n_epochs" :                            n_epochs,
+            "max_steps" :                           max_steps,
+            "shared_params" :                       shared_params,
+            "total_time" :                          total_time,
+            "episode_rewards" :                     episode_rewards,
+            "episode_rewards_moving_avg" :          episode_rewards_moving_avg,
+            "episode_percent_explored" :            episode_percent_explored,
+            "episode_percent_explored_mvg_avg" :    episode_percent_explored_moving_avg
         }
 
         self.save_data_to_file("{}/data_{}.json".format(save_dir, start_time_fname), data)
@@ -508,9 +520,9 @@ class TeamExplore():
 
 
 if __name__ == "__main__":
-    # te = TeamExplore()
+    te = TeamExplore()
 
     # Single agent
-    te = TeamExplore(n_agents=1, agent_abilities=[[1, 3, 4]])
+    # te = TeamExplore(n_agents=1, agent_abilities=[[1, 3, 4]])
 
     te.train()
