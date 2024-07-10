@@ -7,9 +7,7 @@ This project implements the QMIX learning algorithm, training multiple agents wi
 
 Two agents explore a random map. The red agent can move through green tiles while the purple agent can move through blue tiles. The left side of the gif below shows the "ground truth" global state, while the right side shows the red agent's observation combined with the purple agent's observation history (i.e. the shared local observations).
 
-<p align="center" style="text-algin:center">
-  <img src="media/example_run.gif.gif">
-</p>
+![til](media/example_run.gif)
 
 ## Project Breakdown
 
