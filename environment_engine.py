@@ -242,11 +242,25 @@ class EnvEngine(EnvBase):
             shape=torch.Size((self.n_agents, 1)),
             device=self.device
         )
+        state_spec = Categorical(
+                    n=len(CellType),
+                    # shape=torch.Size((self.n_agents, self.obs_size)),
+                    shape=torch.Size((self.n_agents, self.rows, self.cols)),
+                    dtype=torch.float32,
+                    device=self.device
+        )
         spec = Composite(
             {
                 "agents": Composite(
                     # {"observation": obs_spec, "action_mask": mask_spec, "non_normalized_obs": non_normalized_obs_spec},
-                    {"observation": obs_spec, "action_mask": mask_spec, "done": done_spec, "terminated": terminated_spec, "reward": reward_spec},
+                    {
+                        "observation": obs_spec,
+                        "action_mask": mask_spec,
+                        "done": done_spec,
+                        "terminated": terminated_spec,
+                        "reward": reward_spec,
+                        "state": state_spec,
+                    },
                     shape=torch.Size((self.n_agents,))
                 ),
                 "state": Categorical(
@@ -311,13 +325,15 @@ class EnvEngine(EnvBase):
         self.cur_step_reward = 0
 
         reward = 0.0
+        agent_reward = torch.zeros((self.n_agents, 1), device=self.device, dtype=torch.float32)
 
         # Move each agent in order and build observation map
         for i, action in enumerate(acts):
             # Move agent, get reward from movement
-            reward += self.move_agent(self.agents[i], Action(action.item()))
+            agent_reward[i] += self.move_agent(self.agents[i], Action(action.item()))
             # Calculate agent observation and accumulate reward from viewing new cells
-            reward += self.test_calc_agent_observation(self.agents[i])
+            agent_reward[i] += self.test_calc_agent_observation(self.agents[i])
+            reward += agent_reward[i].item()
         
         # time_move_obs = time.time()
         # print("move_obs - step_start = {}".format(time_move_obs-time_step_start))
@@ -377,6 +393,10 @@ class EnvEngine(EnvBase):
         # state = torch.tensor(self.map_to_numeric(self.state_map), dtype=torch.float32)
         state = self.state_map
 
+        agent_state = torch.unsqueeze(state, 0)
+        agent_state = agent_state.repeat(2,1,1)
+        agent_state = torch.unsqueeze(agent_state, 1)
+
         # TODO: normalize state between 0-1
         # state = self.state_map / self.get_agent_cell_from_id(self.agents[-1])
 
@@ -421,7 +441,7 @@ class EnvEngine(EnvBase):
         # print("done_calc - obs_map = {}".format(time_done_calc-time_move_obs))
 
         reward = torch.tensor([reward], device=self.device, dtype=torch.float32)
-        agent_reward = torch.tensor([[reward]] * self.n_agents, device=self.device, dtype=torch.float32)
+        # agent_reward = torch.tensor([[reward]] * self.n_agents, device=self.device, dtype=torch.float32)
 
         done = torch.tensor([ep_done], device=self.device, dtype=torch.bool)
         agent_done = torch.tensor([[ep_done]] * self.n_agents, device=self.device, dtype=torch.bool)
@@ -442,7 +462,15 @@ class EnvEngine(EnvBase):
         # state = torch.zeros(self.n_agents, self.obs_size)
 
         agents_td = TensorDict(
-            {"observation": obs, "action_mask": mask, "done": agent_done, "terminated": agent_done.clone(), "reward": agent_reward}, batch_size=(self.n_agents,)
+            {
+                "observation": obs,
+                "action_mask": mask,
+                "done": agent_done,
+                "terminated": agent_done.clone(),
+                "reward": agent_reward,
+                "state": agent_state,
+            },
+            batch_size=(self.n_agents,)
         )
 
         info = TensorDict(
@@ -510,6 +538,9 @@ class EnvEngine(EnvBase):
 
         state = self.state_map
 
+        agent_state = torch.unsqueeze(state, 0)
+        agent_state = agent_state.repeat(2,1,1)
+        agent_state = torch.unsqueeze(agent_state, 1)
 
         # for agent in self.agents:
         #     agent_obs = self.calc_agent_observation(agent)  # this should return a map
@@ -545,11 +576,20 @@ class EnvEngine(EnvBase):
         percent_explored = torch.tensor([0], device=self.device, dtype=torch.float32)
 
         reward = torch.tensor([0])
-        agent_reward = torch.tensor([[0]] * self.n_agents, device=self.device, dtype=torch.float32)
+        # agent_reward = torch.tensor([[0]] * self.n_agents, device=self.device, dtype=torch.float32)
+        agent_reward = torch.zeros((self.n_agents, 1), device=self.device, dtype=torch.float32)
         done = torch.tensor([[0]] * self.n_agents, device=self.device)
 
         agents_td = TensorDict(
-            {"observation": obs, "action_mask": mask, "done": done, "terminated": done.clone(), "reward": agent_reward}, batch_size=(self.n_agents,)
+            {
+                "observation": obs,
+                "action_mask": mask,
+                "done": done,
+                "terminated": done.clone(),
+                "reward": agent_reward,
+                "state": agent_state,
+            }, 
+            batch_size=(self.n_agents,)
         )
 
         info = TensorDict(
@@ -684,39 +724,79 @@ class EnvEngine(EnvBase):
     def check_agent_ability(self, agent:Agent, n_row, n_col):
         move_valid = False
         reward_mod = 0
-
         # Check if position out of bounds
         if n_row < 0 or n_row >= self.map.shape[0] or n_col < 0 or n_col >= self.map.shape[1]:
-            move_valid = False
+            # move_valid = False
             reward_mod = self.negative_reward_mod
             return move_valid, reward_mod
 
         # Check if cell already occupied
         for check_agent in self.agents:
+            if check_agent.id == agent.id:
+                continue
             if check_agent.position == (n_row, n_col):
-                move_valid = False
+                # move_valid = False
                 reward_mod = self.negative_reward_mod
                 return move_valid, reward_mod
 
-        # Check type of cell the agent is attempting to move to
-        match self.map[n_row, n_col]:
-            case CellType.FLOOR:
+        def floor(agent:Agent):
+            move_valid = True
+            reward_mod = 0
+            return move_valid, reward_mod
+        
+        def grass(agent:Agent):
+            if CellType.GRASS in agent.abilities:
                 move_valid = True
-            case CellType.GRASS:
-                if CellType.GRASS in agent.abilities:
-                    move_valid = True
-                    # reward_mod = self.ability_tile_reward_mod
-                else:
-                    reward_mod = self.negative_reward_mod
-            case CellType.WATER:
-                if CellType.WATER in agent.abilities:
-                    move_valid = True
-                    # reward_mod = self.ability_tile_reward_mod
-                else:
-                    reward_mod = self.negative_reward_mod
-            case CellType.WALL:
+                reward_mod = 0
+            else:
                 move_valid = False
                 reward_mod = self.negative_reward_mod
+            return move_valid, reward_mod
+        
+        def water(agent:Agent):
+            if CellType.WATER in agent.abilities:
+                move_valid = True
+                reward_mod = 0
+            else:
+                move_valid = False
+                reward_mod = self.negative_reward_mod
+            return move_valid, reward_mod
+        
+        def wall(agent:Agent):
+            move_valid = False
+            reward_mod = self.negative_reward_mod
+            return move_valid, reward_mod
+
+        cell_mappings = {
+            CellType.FLOOR: floor,
+            CellType.GRASS: grass,
+            CellType.WATER: water,
+            CellType.WALL: wall
+        }
+
+        # print(self.map[n_row, n_col].item())
+
+        move_valid, reward_mod = cell_mappings[self.map[n_row, n_col].item()](agent)
+
+        # # Check type of cell the agent is attempting to move to
+        # match self.map[n_row, n_col]:
+        #     case CellType.FLOOR:
+        #         move_valid = True
+        #     case CellType.GRASS:
+        #         if CellType.GRASS in agent.abilities:
+        #             move_valid = True
+        #             # reward_mod = self.ability_tile_reward_mod
+        #         else:
+        #             reward_mod = self.negative_reward_mod
+        #     case CellType.WATER:
+        #         if CellType.WATER in agent.abilities:
+        #             move_valid = True
+        #             # reward_mod = self.ability_tile_reward_mod
+        #         else:
+        #             reward_mod = self.negative_reward_mod
+        #     case CellType.WALL:
+        #         move_valid = False
+        #         reward_mod = self.negative_reward_mod
                 
         return move_valid, reward_mod
 
@@ -879,7 +959,7 @@ class EnvEngine(EnvBase):
 
     def test_calc_agent_observation(self, agent:Agent):
         x, y = agent.position
-
+        
         x0 = max(0, x - agent.rangeOfSight)
         x1 = min(self.rows, x + agent.rangeOfSight)
         y0 = max(0, y - agent.rangeOfSight)
@@ -905,7 +985,6 @@ class EnvEngine(EnvBase):
         # NOTE: Don't need to return agent specific observations here because we want to calculate
         #       all observations of all agents first, then create individual observations
         
-        # Return num_unknown as reward
         return reward
 
     def calc_agent_observation(self, agent:Agent):

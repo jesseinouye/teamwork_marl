@@ -168,7 +168,8 @@ class AgentPPO():
 
         value_module = ValueOperator(
             module=critic_module,
-            in_keys=[("agents", "observation")]
+            in_keys=[("agents", "state")]
+            # in_keys=[("agents", "observation")]
         )
         
         return value_module
@@ -176,7 +177,7 @@ class AgentPPO():
     def train(self):
 
         # Tmp training params
-        collector_runs = 10
+        collector_runs = 100
         # frames_per_collector_run = 8192
         frames_per_collector_run = 4096
         total_frames = frames_per_collector_run * collector_runs   
@@ -195,7 +196,8 @@ class AgentPPO():
     
         # PPO stuff
         clip_epsilon = 0.2
-        entropy_eps = 1e-4
+        entropy_eps = 1e-3
+        # entropy_eps = 1e-4
 
         shared_params = False
 
@@ -250,9 +252,13 @@ class AgentPPO():
         start_time_fname = time.strftime("%Y%m%d_%H%M%S")
         save_dir = "data/{}/".format(start_time_fname)
         Path(save_dir).mkdir(parents=True, exist_ok=True)
+        eval_dir = "{}/eval/".format(save_dir)
+        Path(eval_dir).mkdir(parents=True, exist_ok=True)
+
 
         total_frames = 0
         start_time = time.time()
+        sampling_time = time.time()
 
         print("Enumerating collector")
         for i, tensordict_data in enumerate(collector):
@@ -317,7 +323,7 @@ class AgentPPO():
 
                 eval_reward = rollouts["next", "episode_reward"][-1].item()
                 eval_percent_explored = rollouts["next", "percent_explored"][-1].item() * 100
-                print(  "eval reward: {}  -- perc explored: {}".format(eval_reward, eval_percent_explored))
+                print("  eval reward: {}  -- perc explored: {}".format(eval_reward, eval_percent_explored))
 
                 episode_rewards.append(eval_reward)
                 episode_percent_explored.append(eval_percent_explored)
@@ -338,7 +344,7 @@ class AgentPPO():
                 episode_rewards_moving_avg.append(reward_avg)
                 episode_percent_explored_moving_avg.append(percent_avg)
 
-                self.save_actions_to_file("{}/eval_{}_iter_{}.json".format(save_dir, start_time_fname, i), rollouts["agents", "action"])
+                self.save_actions_to_file("{}/eval_{}_iter_{}.json".format(eval_dir, start_time_fname, i), rollouts["agents", "action"])
 
                 if eval_reward > best_eval_reward:
                     torch.save(self.policy, "{}/policy_pickle_{}.pkl".format(save_dir, start_time_fname))
@@ -347,7 +353,7 @@ class AgentPPO():
                 evaluation_time = time.time() - evaluation_start
                 print("  eval_time: {}".format(evaluation_time))
 
-            sampling_start = time.time()
+            sampling_time = time.time()
 
         total_time = time.time() - start_time
         print("total_time: {}".format(total_time))
