@@ -20,3 +20,6 @@ The Map Engine randomly generates explorable areas and handles agent actions. It
 The QMIX algorithm is implemented with PyTorch / TorchRL.
 
 
+## Versions
+
+TODO: get versions of python, packages, cuda, etc.

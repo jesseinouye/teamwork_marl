@@ -15,7 +15,8 @@ from collections import Counter
 from tensordict import TensorDict, TensorDictBase
 
 from torchrl.envs import EnvBase
-from torchrl.data import DiscreteTensorSpec, BoundedTensorSpec, OneHotDiscreteTensorSpec, UnboundedContinuousTensorSpec, CompositeSpec
+# from torchrl.data import DiscreteTensorSpec, BoundedTensorSpec, OneHotDiscreteTensorSpec, UnboundedContinuousTensorSpec, CompositeSpec
+from torchrl.data import Categorical, OneHot, UnboundedContinuous, Composite
 
 from torchrl.envs.libs.vmas import VmasEnv
 from torchrl.envs.libs.smacv2 import SMACv2Env
@@ -164,37 +165,37 @@ class EnvEngine(EnvBase):
         self.action_spec = self._make_action_spec()
         self.observation_spec = self._make_observation_spec()
 
-        self.reward_spec = UnboundedContinuousTensorSpec(
+        self.reward_spec = UnboundedContinuous(
             shape=torch.Size((1,)),
             device=self.device
         )
 
-        self.done_spec = DiscreteTensorSpec(
+        self.done_spec = Categorical(
             n=2,
             shape=torch.Size((1,)),
             dtype=torch.bool,
             device=self.device
         )
 
-    def _make_action_spec(self) -> CompositeSpec:
-        action_spec = OneHotDiscreteTensorSpec(
+    def _make_action_spec(self) -> Composite:
+        action_spec = OneHot(
             self.n_actions,
             shape=torch.Size((self.n_agents, self.n_actions)),
             device=self.device,
             dtype=torch.long,
         )
 
-        full_action_spec = CompositeSpec(
+        full_action_spec = Composite(
             {
-                "agents": CompositeSpec(
+                "agents": Composite(
                     {"action": action_spec}, shape=torch.Size((self.n_agents,))
                 )
             }
         )
         return full_action_spec
     
-    def _make_observation_spec(self) -> CompositeSpec:
-        obs_spec = DiscreteTensorSpec(
+    def _make_observation_spec(self) -> Composite:
+        obs_spec = Categorical(
             n=len(CellType),
             # shape=torch.Size((self.n_agents, self.obs_size)),
             shape=torch.Size((self.n_agents, self.rows, self.cols)),
@@ -202,37 +203,53 @@ class EnvEngine(EnvBase):
             dtype=torch.float32,
             device=self.device
         )
-        non_normalized_obs_spec = DiscreteTensorSpec(
+        non_normalized_obs_spec = Categorical(
             n=len(CellType),
             # shape=torch.Size((self.n_agents, self.obs_size)),
             shape=torch.Size((self.n_agents, self.rows, self.cols)),
             dtype=torch.float32,
             device=self.device
         )
-        info_spec = CompositeSpec(
+        info_spec = Composite(
             {
-                "episode_limit": DiscreteTensorSpec(
+                "episode_limit": Categorical(
                     2, dtype=torch.int8, device=self.device
                 ),
-                "map_explored": DiscreteTensorSpec(
+                "map_explored": Categorical(
                     2, dtype=torch.int8, device=self.device
                 )
             }
         )
-        mask_spec = DiscreteTensorSpec(
+        mask_spec = Categorical(
             2,
             torch.Size((self.n_agents, self.n_actions)),
             device=self.device,
             dtype=torch.int8
         )
-        spec = CompositeSpec(
+        done_spec = Categorical(
+            n=2,
+            shape=torch.Size((self.n_agents, 1)),
+            dtype=torch.bool,
+            device=self.device
+        )
+        terminated_spec = Categorical(
+            n=2,
+            shape=torch.Size((self.n_agents, 1)),
+            dtype=torch.bool,
+            device=self.device
+        )
+        reward_spec = UnboundedContinuous(
+            shape=torch.Size((self.n_agents, 1)),
+            device=self.device
+        )
+        spec = Composite(
             {
-                "agents": CompositeSpec(
+                "agents": Composite(
                     # {"observation": obs_spec, "action_mask": mask_spec, "non_normalized_obs": non_normalized_obs_spec},
-                    {"observation": obs_spec, "action_mask": mask_spec},
+                    {"observation": obs_spec, "action_mask": mask_spec, "done": done_spec, "terminated": terminated_spec, "reward": reward_spec},
                     shape=torch.Size((self.n_agents,))
                 ),
-                "state": DiscreteTensorSpec(
+                "state": Categorical(
                     n=len(CellType),
                     # shape=torch.Size((self.n_agents, self.obs_size)),
                     shape=torch.Size((self.rows, self.cols)),
@@ -247,11 +264,11 @@ class EnvEngine(EnvBase):
                 #     dtype=torch.float32,
                 #     device=self.device
                 # ),
-                "percent_explored" : UnboundedContinuousTensorSpec(
+                "percent_explored" : UnboundedContinuous(
                     shape=torch.Size((1,)),
                     device=self.device
                 ),
-                "episode_reward": UnboundedContinuousTensorSpec(
+                "episode_reward": UnboundedContinuous(
                     shape=torch.Size((1,)),
                     device=self.device
                 ),
@@ -404,8 +421,10 @@ class EnvEngine(EnvBase):
         # print("done_calc - obs_map = {}".format(time_done_calc-time_move_obs))
 
         reward = torch.tensor([reward], device=self.device, dtype=torch.float32)
+        agent_reward = torch.tensor([[reward]] * self.n_agents, device=self.device, dtype=torch.float32)
 
         done = torch.tensor([ep_done], device=self.device, dtype=torch.bool)
+        agent_done = torch.tensor([[ep_done]] * self.n_agents, device=self.device, dtype=torch.bool)
 
         percent_explored = torch.tensor([percent_explored], device=self.device, dtype=torch.float32)
 
@@ -423,7 +442,7 @@ class EnvEngine(EnvBase):
         # state = torch.zeros(self.n_agents, self.obs_size)
 
         agents_td = TensorDict(
-            {"observation": obs, "action_mask": mask}, batch_size=(self.n_agents,)
+            {"observation": obs, "action_mask": mask, "done": agent_done, "terminated": agent_done.clone(), "reward": agent_reward}, batch_size=(self.n_agents,)
         )
 
         info = TensorDict(
@@ -525,8 +544,12 @@ class EnvEngine(EnvBase):
 
         percent_explored = torch.tensor([0], device=self.device, dtype=torch.float32)
 
+        reward = torch.tensor([0])
+        agent_reward = torch.tensor([[0]] * self.n_agents, device=self.device, dtype=torch.float32)
+        done = torch.tensor([[0]] * self.n_agents, device=self.device)
+
         agents_td = TensorDict(
-            {"observation": obs, "action_mask": mask}, batch_size=(self.n_agents,)
+            {"observation": obs, "action_mask": mask, "done": done, "terminated": done.clone(), "reward": agent_reward}, batch_size=(self.n_agents,)
         )
 
         info = TensorDict(
@@ -537,9 +560,6 @@ class EnvEngine(EnvBase):
             batch_size=(),
             device=self.device
         )
-
-        reward = torch.tensor([0])
-        done = torch.tensor([0])
 
         out = TensorDict(
             source={
