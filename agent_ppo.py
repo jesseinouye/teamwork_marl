@@ -107,38 +107,6 @@ class AgentPPO():
 
     def build_critic(self):
         hidden_dim = 4096
-        action_space = 5
-
-        # cnn = MultiAgentConvNet(
-        #     n_agents=self.n_agents,
-        #     centralized=False,
-        #     share_params=False,
-        #     in_features=1,
-        #     kernel_sizes=[5, 3, 3],
-        #     num_cells=[32, 64, 64],
-        #     strides=[2, 2, 1],
-        #     paddings=[1, 1, 1],
-        #     activation_class=torch.nn.ReLU,
-        #     device=self.device
-        # )
-        
-        # cnn_module = TensorDictModule(cnn, in_keys=[("agents", "observation")], out_keys=[("agents", "hidden")])
-
-        # mlp = MultiAgentMLP(
-        #         n_agent_inputs=hidden_dim,
-        #         n_agent_outputs=1,
-        #         n_agents=self.n_agents,
-        #         centralized=True,
-        #         share_params=False,
-        #         depth=2,
-        #         num_cells=256,
-        #         activation_class=nn.ReLU,
-        #         device=self.device
-        #     )
-
-        # mlp_module = TensorDictModule(mlp, in_keys=[("agents", "hidden")])
-
-        # critic_module = SafeSequential(cnn_module, mlp_module)
 
         critic_module = nn.Sequential(
             MultiAgentConvNet(
@@ -169,7 +137,6 @@ class AgentPPO():
         value_module = ValueOperator(
             module=critic_module,
             in_keys=[("agents", "state")]
-            # in_keys=[("agents", "observation")]
         )
         
         return value_module
@@ -229,8 +196,6 @@ class AgentPPO():
             normalize_advantage=False
         )
         loss_module.set_keys(
-            # reward=self.env.reward_key,
-            # action=self.env.action_key,
             reward=("agents", "reward"),
             action=("agents", "action"),
             done=("agents", "done"),
@@ -436,8 +401,6 @@ class AgentPPO():
 
     # Save tensor of actions to json file
     def save_actions_to_file(self, fname, actions):
-        # for step in actions:
-        #     print("step: {}".format(step))
         list_actions = [step.tolist() for step in actions]
         dict_actions = {"seed" : self.seed, "n_agents" : self.n_agents, "agent_abilities" : self.agent_abilities, "actions" : list_actions}
 

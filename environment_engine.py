@@ -15,7 +15,6 @@ from collections import Counter
 from tensordict import TensorDict, TensorDictBase
 
 from torchrl.envs import EnvBase
-# from torchrl.data import DiscreteTensorSpec, BoundedTensorSpec, OneHotDiscreteTensorSpec, UnboundedContinuousTensorSpec, CompositeSpec
 from torchrl.data import Categorical, OneHot, UnboundedContinuous, Composite
 
 from torchrl.envs.libs.vmas import VmasEnv
@@ -23,10 +22,6 @@ from torchrl.envs.libs.smacv2 import SMACv2Env
 
 from tile import CellType, Tile 
 
-
-# Agent observations
-# class AgentObs(CellType):
-#     UNKNOWN = 6
 
 np.set_printoptions(threshold=sys.maxsize)
 
@@ -98,15 +93,10 @@ class EnvEngine(EnvBase):
         self.state_map = copy.deepcopy(self.map)
 
         # Create observation map
-        # self.obs_map = [[Tile(CellType.UNKNOWN) for _ in range(self.cols)] for _ in range(self.rows)]
-        # self.obs_map = np.array(self.obs_map)
-
-        # Create observation map
         self.obs_map = torch.zeros_like(self.map, dtype=torch.float32, device=self.device)
 
         # Create observation maps for each agent shape = (n_agents, rows, cols)
         self.all_agent_obs = torch.zeros((self.n_agents, self.obs_map.shape[0], self.obs_map.shape[1]), dtype=torch.float32, device=self.device)
-        # self.all_agent_obs = torch.zeros((self.n_agents, 2, self.obs_map.shape[0], self.obs_map.shape[1]), dtype=torch.float32, device=self.device)
 
         # Put tensors on correct device
         self.map = self.map.to(self.device)
@@ -120,16 +110,9 @@ class EnvEngine(EnvBase):
         for i in range(n_agents):
             self.load_agent(abilities=agent_abilities[i])
 
-        # TODO: figure out how to define this - determined by whether we use a CNN or flattened tensor?
-        # self.obs_size = self.rows * self.cols
-
         self.num_walkable_tiles = torch.sum((self.map == CellType.FLOOR))
         self.num_walkable_tiles += torch.sum((self.map == CellType.GRASS))
         self.num_walkable_tiles += torch.sum((self.map == CellType.WATER))
-
-        # self.walkable_tile_indices = (self.map == CellType.FLOOR).nonzero(as_tuple=True)
-        # torch.cat(self.walkable_tile_indices, (self.map == CellType.GRASS).nonzero(as_tuple=True))
-        # torch.cat(self.walkable_tile_indices, (self.map == CellType.WATER).nonzero(as_tuple=True))
 
         self.cur_step_reward = 0
 
@@ -155,7 +138,6 @@ class EnvEngine(EnvBase):
             Action.SOUTH : (1, 0),
             Action.WEST : (0, -1)
         }
-
 
         # Make spec for action and observation
         self._make_spec()
@@ -197,15 +179,12 @@ class EnvEngine(EnvBase):
     def _make_observation_spec(self) -> Composite:
         obs_spec = Categorical(
             n=len(CellType),
-            # shape=torch.Size((self.n_agents, self.obs_size)),
             shape=torch.Size((self.n_agents, self.rows, self.cols)),
-            # shape=torch.Size((self.n_agents, 2, self.rows, self.cols)),
             dtype=torch.float32,
             device=self.device
         )
         non_normalized_obs_spec = Categorical(
             n=len(CellType),
-            # shape=torch.Size((self.n_agents, self.obs_size)),
             shape=torch.Size((self.n_agents, self.rows, self.cols)),
             dtype=torch.float32,
             device=self.device
@@ -244,7 +223,6 @@ class EnvEngine(EnvBase):
         )
         state_spec = Categorical(
                     n=len(CellType),
-                    # shape=torch.Size((self.n_agents, self.obs_size)),
                     shape=torch.Size((self.n_agents, self.rows, self.cols)),
                     dtype=torch.float32,
                     device=self.device
@@ -252,7 +230,6 @@ class EnvEngine(EnvBase):
         spec = Composite(
             {
                 "agents": Composite(
-                    # {"observation": obs_spec, "action_mask": mask_spec, "non_normalized_obs": non_normalized_obs_spec},
                     {
                         "observation": obs_spec,
                         "action_mask": mask_spec,
@@ -265,19 +242,11 @@ class EnvEngine(EnvBase):
                 ),
                 "state": Categorical(
                     n=len(CellType),
-                    # shape=torch.Size((self.n_agents, self.obs_size)),
                     shape=torch.Size((self.rows, self.cols)),
                     dtype=torch.float32,
                     device=self.device
                 ),
                 "info": info_spec,
-                # "non_normalized_state": DiscreteTensorSpec(
-                #     n=len(CellType),
-                #     # shape=torch.Size((self.n_agents, self.obs_size)),
-                #     shape=torch.Size((self.rows, self.cols)),
-                #     dtype=torch.float32,
-                #     device=self.device
-                # ),
                 "percent_explored" : UnboundedContinuous(
                     shape=torch.Size((1,)),
                     device=self.device
@@ -286,13 +255,6 @@ class EnvEngine(EnvBase):
                     shape=torch.Size((1,)),
                     device=self.device
                 ),
-                # "local_obs" : DiscreteTensorSpec(
-                #     n=len(CellType),
-                #     # shape=torch.Size((self.n_agents, self.obs_size)),
-                #     shape=torch.Size((self.rows, self.cols)),
-                #     dtype=torch.float32,
-                #     device=self.device
-                # )
             }
         )
         return spec
@@ -316,12 +278,10 @@ class EnvEngine(EnvBase):
         #   - Calculate reward from observation and prev observed map?
         #   - Update observed map
         actions = tensordict["agents", "action"]
-        # time_step_start = time.time()
 
         # Get decoded movements from one-hot tensor
         acts = torch.argmax(actions, dim=1)
 
-        all_agent_obs = []
         self.cur_step_reward = 0
 
         reward = 0.0
@@ -334,9 +294,6 @@ class EnvEngine(EnvBase):
             # Calculate agent observation and accumulate reward from viewing new cells
             agent_reward[i] += self.test_calc_agent_observation(self.agents[i])
             reward += agent_reward[i].item()
-        
-        # time_move_obs = time.time()
-        # print("move_obs - step_start = {}".format(time_move_obs-time_step_start))
 
         # Normalize reward between 0-1
         #   - Lowest reward possible is all agents attempting invalid move (negative_reward_mod * n_agents)
@@ -362,66 +319,27 @@ class EnvEngine(EnvBase):
                     continue
                 if ((other_agent.position[0] >= x0) and (other_agent.position[0] <= x1)) and ((other_agent.position[1] >= y0) and (other_agent.position[1] <= y1)):
                     self.all_agent_obs[agent.id, other_agent.position[0], other_agent.position[1]] = self.agent_id_to_cell_type[other_agent.id]
-
-            # self.all_agent_obs[agent.id, 0, :] = self.obs_map
-            # self.all_agent_obs[agent.id, 0, agent.position[0], agent.position[1]] = self.agent_id_to_cell_type[agent.id]
-            # local_obs = self.get_local_agent_obs_channel(agent)
-            # self.all_agent_obs[agent.id, 1, :] = local_obs
-
-        # time_obs_map = time.time()
-        # print("obs_map - move_obs = {}".format(time_obs_map - time_move_obs))
-
-        # TODO: normalize observation between 0-1
-        # # Normalize between 0-1 (divide by cell value of last agent, which is the highest possible cell value)
-        # self.all_agent_obs[agent.id] /= self.get_agent_cell_from_id(self.agents[-1])
         
         obs = self.all_agent_obs
-
-        # # Move each agent in order
-        # for i, action in enumerate(acts):
-        #     # print("i: {} / action: {}".format(i, action))
-        #     self.move_agent(self.agents[i], Action(action.item()))
-        #     agent_obs = self.map_to_numeric(self.calc_agent_observation(self.agents[i]))
-        #     all_agent_obs.append(agent_obs)
-
-        # all_agent_obs = np.array(all_agent_obs)
-        # obs = torch.tensor(all_agent_obs, dtype=torch.float32)
         
         # Adding 'channels' dimension
         obs = torch.unsqueeze(obs, 1)
 
-        # state = torch.tensor(self.map_to_numeric(self.state_map), dtype=torch.float32)
         state = self.state_map
 
         agent_state = torch.unsqueeze(state, 0)
         agent_state = agent_state.repeat(2,1,1)
         agent_state = torch.unsqueeze(agent_state, 1)
 
-        # TODO: normalize state between 0-1
-        # state = self.state_map / self.get_agent_cell_from_id(self.agents[-1])
-
-
-        # reward = torch.tensor([self.cur_step_reward], device=self.device, dtype=torch.float32)
         self.episode_reward += reward
-
-        # print("step -- actions: {} -- reward: {}".format(acts, reward))
 
         ep_done = 0
 
-        # TODO: Calculate if done via exploration
-
         # Count number of observed cells that are walkable
-        num_obs_walkable_cells = torch.sum((self.obs_map == CellType.FLOOR) | (self.obs_map == CellType.WATER) | (self.obs_map == CellType.GRASS))
-        # num_obs_walkable_cells = torch.sum((self.obs_map == CellType.FLOOR))
-        # num_obs_walkable_cells += torch.sum((self.obs_map == CellType.WATER))
-        # num_obs_walkable_cells += torch.sum((self.obs_map == CellType.GRASS))
-
-        # num_obs_walkable_cells = torch.sum(((self.obs_map == CellType.FLOOR) or (self.obs_map == CellType.WATER) or (self.obs_map == CellType.GRASS)))
-
+        num_obs_walkable_cells = torch.sum(
+            (self.obs_map == CellType.FLOOR) | (self.obs_map == CellType.WATER) | (self.obs_map == CellType.GRASS))
         percent_explored = num_obs_walkable_cells / self.num_walkable_tiles
 
-        # num_unknown = torch.sum((self.obs_map == CellType.UNKNOWN))
-        # percent_explored = 1 - (num_unknown / self.map_area)
 
         # If explored map over a threshold, end episode
         if percent_explored > 0.99:
@@ -437,29 +355,17 @@ class EnvEngine(EnvBase):
             # TODO: if whole map not explored, do negative reward
             #       negative reward = number of tiles left UNKNOWN ?
 
-        # time_done_calc = time.time()
-        # print("done_calc - obs_map = {}".format(time_done_calc-time_move_obs))
-
         reward = torch.tensor([reward], device=self.device, dtype=torch.float32)
-        # agent_reward = torch.tensor([[reward]] * self.n_agents, device=self.device, dtype=torch.float32)
-
         done = torch.tensor([ep_done], device=self.device, dtype=torch.bool)
         agent_done = torch.tensor([[ep_done]] * self.n_agents, device=self.device, dtype=torch.bool)
-
         percent_explored = torch.tensor([percent_explored], device=self.device, dtype=torch.float32)
-
-
-        # TODO: fix these to output actual data
-        #       should match format of observation spec ?
-
-        # obs = torch.zeros(self.n_agents, self.obs_size)
+        episode_reward = torch.tensor([self.episode_reward], device=self.device, dtype=torch.float32)
 
         # TODO: remove action_mask from the spec (it's not needed - used to dynamically mask valid/invalid actions)
         mask = torch.tensor([[1, 1, 1, 1, 1]] * self.n_agents, device=self.device, dtype=torch.int8)
 
-        episode_reward = torch.tensor([self.episode_reward], device=self.device, dtype=torch.float32)
 
-        # state = torch.zeros(self.n_agents, self.obs_size)
+
 
         agents_td = TensorDict(
             {
