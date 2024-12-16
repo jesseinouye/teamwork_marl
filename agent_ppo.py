@@ -144,7 +144,7 @@ class AgentPPO():
     def train(self):
 
         # Tmp training params
-        collector_runs = 100
+        collector_runs = 300
         # frames_per_collector_run = 8192
         frames_per_collector_run = 4096
         total_frames = frames_per_collector_run * collector_runs   
@@ -160,6 +160,7 @@ class AgentPPO():
         max_grad_norm = 30
         n_epochs = 5
         max_steps = 300     # Steps run during eval
+        n_collector_runs_change_map = 5
     
         # PPO stuff
         clip_epsilon = 0.2
@@ -229,7 +230,7 @@ class AgentPPO():
         for i, tensordict_data in enumerate(collector):
             print(f"ITERATION: {i}")
 
-            sampling_time = time.time() - start_time
+            sampling_time = time.time() - sampling_time
             print("  sampling_time: {}".format(sampling_time))
 
             with torch.no_grad():
@@ -319,6 +320,11 @@ class AgentPPO():
                 print("  eval_time: {}".format(evaluation_time))
 
             sampling_time = time.time()
+
+            # Change environment map
+            if i == (n_collector_runs_change_map - 1):
+                pass
+
 
         total_time = time.time() - start_time
         print("total_time: {}".format(total_time))

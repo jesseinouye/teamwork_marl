@@ -51,7 +51,7 @@ class Agent():
 # Environment engine
 class EnvEngine(EnvBase):
 
-    def __init__(self, n_agents=2, device="cpu", map_size=32, agent_abilities=[[1], [1]], seed=None, fname=None, max_steps=None) -> None:
+    def __init__(self, n_agents=2, device="cpu", map_size=32, agent_abilities=[[1], [1]], seed=None, fname=None, max_steps=1000) -> None:
         # Check valid inputs
         if len(agent_abilities) != n_agents:
             raise ValueError("ERROR: length of agent ability list (agent_abilities) must match number of agents (n_agents)")    
@@ -62,9 +62,6 @@ class EnvEngine(EnvBase):
 
         # Init super
         super().__init__(device=device, batch_size=[])
-
-        # initialize discovered tiles
-        self.discovered_tiles_num = 0
         
         # self.device = device
         self.n_agents = n_agents
@@ -77,31 +74,7 @@ class EnvEngine(EnvBase):
 
         self.agent_obs_dist = 3
 
-        if max_steps is not None:
-            self.max_steps = max_steps
-        else:
-            self.max_steps = 1000
-
-        if fname is None:
-            # If no filename give, generate map
-            self.map = self.generate_map()
-        else:
-            # If filename given, load map from file
-            self.map = self.load_map(fname)
-
-        # Create state map (contains agent locations)
-        self.state_map = copy.deepcopy(self.map)
-
-        # Create observation map
-        self.obs_map = torch.zeros_like(self.map, dtype=torch.float32, device=self.device)
-
-        # Create observation maps for each agent shape = (n_agents, rows, cols)
-        self.all_agent_obs = torch.zeros((self.n_agents, self.obs_map.shape[0], self.obs_map.shape[1]), dtype=torch.float32, device=self.device)
-
-        # Put tensors on correct device
-        self.map = self.map.to(self.device)
-        self.state_map = self.state_map.to(self.device)
-        self.obs_map = self.obs_map.to(self.device)
+        self.max_steps = max_steps
 
         # List of agents
         self.agents  : List[Agent] = []
@@ -109,16 +82,6 @@ class EnvEngine(EnvBase):
         # Load agents
         for i in range(n_agents):
             self.load_agent(abilities=agent_abilities[i])
-
-        self.num_walkable_tiles = torch.sum((self.map == CellType.FLOOR))
-        self.num_walkable_tiles += torch.sum((self.map == CellType.GRASS))
-        self.num_walkable_tiles += torch.sum((self.map == CellType.WATER))
-
-        self.cur_step_reward = 0
-
-        self.cur_step = 0
-
-        self.episode_reward = 0
 
         # Adjustable params
         self.ability_tile_reward_mod = 2
@@ -141,6 +104,24 @@ class EnvEngine(EnvBase):
 
         # Make spec for action and observation
         self._make_spec()
+
+        # Generate or load map from file
+        if fname is None:
+            # If no filename give, generate map
+            _ = self.generate_map()
+        else:
+            # If filename given, load map from file
+            _ = self.load_map(fname)
+
+        # Reset to initial state (move agents to start, clear obs map, etc.)
+        self.reset_map()
+
+        # Put tensors on correct device
+        self.map = self.map.to(self.device)
+        self.state_map = self.state_map.to(self.device)
+        self.obs_map = self.obs_map.to(self.device)
+
+        self.cur_step = 0
 
 
     def _make_spec(self):
@@ -264,7 +245,11 @@ class EnvEngine(EnvBase):
         rng = torch.manual_seed(seed)
         self.rng = rng
         random.seed(seed)
-        # TODO: set seed for map generation too?
+
+
+    def set_map_seed(self, seed):
+        print("Using map seed: {}".format(seed))
+        random.seed(seed)
 
 
     def _step(self, tensordict: TensorDictBase):
@@ -282,7 +267,7 @@ class EnvEngine(EnvBase):
         # Get decoded movements from one-hot tensor
         acts = torch.argmax(actions, dim=1)
 
-        self.cur_step_reward = 0
+        # self.cur_step_reward = 0
 
         reward = 0.0
         agent_reward = torch.zeros((self.n_agents, 1), device=self.device, dtype=torch.float32)
@@ -364,9 +349,6 @@ class EnvEngine(EnvBase):
         # TODO: remove action_mask from the spec (it's not needed - used to dynamically mask valid/invalid actions)
         mask = torch.tensor([[1, 1, 1, 1, 1]] * self.n_agents, device=self.device, dtype=torch.int8)
 
-
-
-
         agents_td = TensorDict(
             {
                 "observation": obs,
@@ -405,28 +387,19 @@ class EnvEngine(EnvBase):
         )
         
         self.cur_step += 1
-        # print("executed step: {} - actions were: {}".format(self.cur_step, acts))
 
         return out
+
 
     def _reset(self, tensordict:TensorDictBase):
         # Clear observed map
         # Move all agents to start (upper left corner)
         # print("resetting!!")
 
+        # Reset current step, reward, obs map, state map, and place agents
+        self.reset_map()
+
         self.cur_step = 1
-        self.episode_reward = 0
-
-        # Clear observed and state maps
-        self.clear_obs_map()
-        self.clear_state_map()
-        
-        # Move all agents to start
-        self.place_agents_at_start()
-        # self.numeric_state_map = self.map_to_numeric(self.state_map)
-
-        all_agent_obs = []
-
         # Build full observation map
         for agent in self.agents:
             _ = self.test_calc_agent_observation(agent)
@@ -435,11 +408,7 @@ class EnvEngine(EnvBase):
         for agent in self.agents:
             self.all_agent_obs[agent.id, :] = self.obs_map
             self.all_agent_obs[agent.id, agent.position[0], agent.position[1]] = self.agent_id_to_cell_type[agent.id]
-            # self.all_agent_obs[agent.id, 0, :] = self.obs_map
-            # self.all_agent_obs[agent.id, 0, agent.position[0], agent.position[1]] = self.agent_id_to_cell_type[agent.id]
-            # local_obs = self.get_local_agent_obs_channel(agent)
-            # self.all_agent_obs[agent.id, 1, :] = local_obs
-            
+
         obs = self.all_agent_obs
 
         state = self.state_map
@@ -463,26 +432,12 @@ class EnvEngine(EnvBase):
         # Adding 'channels' dimension
         obs = torch.unsqueeze(obs, 1)
 
-        # obs = torch.tensor(all_agent_obs)
-        # state = torch.tensor(self.state_map)
-
-
-        # TODO: fix these to output actual data
-        #       should match format of observation spec ?
-
-        # obs = torch.zeros(self.n_agents, self.obs_size)
-        # tmp_mask = [[1, 0, 0, 0, 0]] * self.n_agents
         mask = torch.tensor([[1, 1, 1, 1, 1]] * self.n_agents, device=self.device)
-        # mask = torch.tensor([[1, 0, 0, 0, 0], [1, 0, 0, 0, 0]])
-
-        # state = torch.zeros(self.n_agents, self.obs_size)
 
         episode_reward = torch.tensor([self.episode_reward], device=self.device, dtype=torch.float32)
 
         percent_explored = torch.tensor([0], device=self.device, dtype=torch.float32)
 
-        reward = torch.tensor([0])
-        # agent_reward = torch.tensor([[0]] * self.n_agents, device=self.device, dtype=torch.float32)
         agent_reward = torch.zeros((self.n_agents, 1), device=self.device, dtype=torch.float32)
         done = torch.tensor([[0]] * self.n_agents, device=self.device)
 
@@ -514,40 +469,24 @@ class EnvEngine(EnvBase):
                 "info": info,
                 "episode_reward": episode_reward,
                 "percent_explored": percent_explored,
-                # "local_obs": local_obs,
-                # "reward": reward,
-                # "done": done,
-                # "terminated": done.clone()
             },
             batch_size=(),
             device=self.device
         )
 
-        # print("OBS: {}".format(obs_array))
-
         return out
 
-    def get_agent_cell_from_id(self, agent:Agent):
-        # Get cell type for agent from ID
-        # match agent.id:
-        #     case 1:
-        #         return Tile(CellType.AGENT_1)
-        #     case 2:
-        #         return Tile(CellType.AGENT_2)
-        #     case 3:
-        #         return Tile(CellType.AGENT_3)
-        #     case 4:
-        #         return Tile(CellType.AGENT_4)
 
-        match agent.id:
-            case 0:
-                return CellType.AGENT_1
-            case 1:
-                return CellType.AGENT_2
-            case 2:
-                return CellType.AGENT_3
-            case 3:
-                return CellType.AGENT_4
+    def reset_map(self):
+        # self.cur_step = 0
+        self.episode_reward = 0
+        self.clear_obs_map()
+        self.clear_state_map()
+        self.place_agents_at_start()
+
+
+    def get_agent_cell_from_id(self, agent:Agent):
+        return self.agent_id_to_cell_type[agent.id]
 
 
     # Load agent with specified abilities
@@ -998,20 +937,25 @@ class EnvEngine(EnvBase):
         # self.all_agent_obs = torch.zeros((self.n_agents, 2, self.obs_map.shape[0], self.obs_map.shape[1]), dtype=torch.float32)
 
 
+
+
     def generate_map(self):
         print("Generating map")
-        map = self.initialize_base_terrain()
-        self.map = map
+        self.map = self.initialize_base_terrain()
         self.apply_cellular_automata()
         self.add_clustered_features(CellType.GRASS, 3, 20)  # 3 clusters, each with 20 cells
         self.add_clustered_features(CellType.WATER, 2, 15)  # 2 clusters, each with 15 cells
         self.ensure_connectivity()
 
-        # self.map = np.array(self.map)
+        # Turn map into tensor
         self.map = torch.tensor(self.map, dtype=torch.float32, device=self.device)
 
+        self.num_walkable_tiles = torch.sum((self.map == CellType.FLOOR))
+        self.num_walkable_tiles += torch.sum((self.map == CellType.GRASS))
+        self.num_walkable_tiles += torch.sum((self.map == CellType.WATER))
+
         print("Map generation complete")
-        return self.map
+        return True
     
     # Randomly assign base terrain types (floor or wall) to each cell
     def initialize_base_terrain(self):
@@ -1168,7 +1112,12 @@ class EnvEngine(EnvBase):
 
         # self.map = np.array(tile_map)
         self.map = torch.tensor(tmp_map, dtype=torch.float32, device=self.device)
-        return self.map
+
+        self.num_walkable_tiles = torch.sum((self.map == CellType.FLOOR))
+        self.num_walkable_tiles += torch.sum((self.map == CellType.GRASS))
+        self.num_walkable_tiles += torch.sum((self.map == CellType.WATER))
+
+        return True
 
     # Get base map data
     def get_map(self):
@@ -1181,9 +1130,9 @@ class EnvEngine(EnvBase):
     def get_agents(self):
         return self.agents
     
-    def is_done(self):
-        total_tiles = self.rows * self.cols
-        return self.discovered_tiles_num >= total_tiles
+    # def is_done(self):
+    #     total_tiles = self.rows * self.cols
+    #     return self.discovered_tiles_num >= total_tiles
 
     def evaluate_map(self):
         # Evaluate the quality of the map produced by the agents

@@ -201,7 +201,7 @@ class TeamExplore():
         collector_runs = 5
         frames_per_collector_run = 8192
         total_frames = frames_per_collector_run * collector_runs   
-        memory_size = 100000
+        memory_size = 50000
         batch_size = 512
         eps_init = 1.0
         eps_end = 0.05
