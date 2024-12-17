@@ -27,29 +27,29 @@ from torchrl.objectives import SoftUpdate, ValueEstimators
 from torchrl.objectives.multiagent.qmixer import QMixerLoss
 
 
-class CustomEGreedyModule(EGreedyModule):
-    def __init__(self, spec: TensorSpec, eps_init: float = 1, eps_end: float = 0.1, annealing_num_steps: int = 1000, *, action_key: str | torch.Tuple[str] | None = "action", action_mask_key: str | torch.Tuple[str] | None = None):
-        super().__init__(spec, eps_init, eps_end, annealing_num_steps, action_key=action_key, action_mask_key=action_mask_key)
+# class CustomEGreedyModule(EGreedyModule):
+#     def __init__(self, spec: TensorSpec, eps_init: float = 1, eps_end: float = 0.1, annealing_num_steps: int = 1000, *, action_key: str | torch.Tuple[str] | None = "action", action_mask_key: str | torch.Tuple[str] | None = None):
+#         super().__init__(spec, eps_init, eps_end, annealing_num_steps, action_key=action_key, action_mask_key=action_mask_key)
 
-    def step(self, frames: int = 1) -> None:
-        """A step of epsilon decay.
+#     def step(self, frames: int = 1) -> None:
+#         """A step of epsilon decay.
 
-        After `self.annealing_num_steps` calls to this method, calls result in no-op.
+#         After `self.annealing_num_steps` calls to this method, calls result in no-op.
 
-        Args:
-            frames (int, optional): number of frames since last step. Defaults to ``1``.
+#         Args:
+#             frames (int, optional): number of frames since last step. Defaults to ``1``.
 
-        """
-        if self.eps == self.eps_end:
-            self.eps.data[0] = self.eps_init.item()
-        else:
-            for _ in range(frames):
-                self.eps.data[0] = max(
-                    self.eps_end.item(),
-                    (
-                        self.eps - (self.eps_init - self.eps_end) / self.annealing_num_steps
-                    ).item(),
-                )
+#         """
+#         if self.eps == self.eps_end:
+#             self.eps.data[0] = self.eps_init.item()
+#         else:
+#             for _ in range(frames):
+#                 self.eps.data[0] = max(
+#                     self.eps_end.item(),
+#                     (
+#                         self.eps - (self.eps_init - self.eps_end) / self.annealing_num_steps
+#                     ).item(),
+#                 )
 
 
 
@@ -186,6 +186,22 @@ class TeamExplore():
         frames_per_collector_run = 8192
         total_frames = frames_per_collector_run * collector_runs   
         memory_size = 100000
+        batch_size = 512
+        eps_init = 1.0
+        eps_end = 0.05
+        eps_num_steps = 100000
+        gamma = 0.99
+        tau = 0.005
+        lr = 5e-5
+        max_grad_norm = 30
+        n_epochs = 5
+        max_steps = 300     # Steps run during eval
+
+        # Tmp training params
+        collector_runs = 5
+        frames_per_collector_run = 8192
+        total_frames = frames_per_collector_run * collector_runs   
+        memory_size = 50000
         batch_size = 512
         eps_init = 1.0
         eps_end = 0.05
